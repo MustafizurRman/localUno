@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Imported from Claude Design project: assets/badge-flip.svg -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="68dp"
+    android:height="96dp"
+    android:viewportWidth="68"
+    android:viewportHeight="96">
+    <path android:fillColor="#FF1A1C2B" android:pathData="M0,9a9,9 0 0 1 9,-9h50a9,9 0 0 1 9,9v78a9,9 0 0 1 -9,9h-50a9,9 0 0 1 -9,-9z" />
+    <path android:fillColor="#FFAA96DA" android:pathData="M9,14a5,5 0 0 1 5,-5h40a5,5 0 0 1 5,5v68a5,5 0 0 1 -5,5h-40a5,5 0 0 1 -5,-5z" />
+    <!-- Dark-side wedge: the source's degenerate "M9 87h50a0 0 0 0 0 0 0V9z" is just the
+         lower-left triangle of the inner card, which is what actually paints. -->
+    <path android:fillColor="#FF1A1C2B" android:fillAlpha="0.85" android:pathData="M9,87h50V9z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFF7F5EF"
+        android:strokeWidth="4"
+        android:pathData="M34,48m-14,0a14,14 0 1,0 28,0a14,14 0 1,0 -28,0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFF2EFE6"
+        android:strokeWidth="4"
+        android:pathData="M10,3.5h48a6.5,6.5 0 0 1 6.5,6.5v76a6.5,6.5 0 0 1 -6.5,6.5h-48a6.5,6.5 0 0 1 -6.5,-6.5v-76a6.5,6.5 0 0 1 6.5,-6.5z" />
+</vector>

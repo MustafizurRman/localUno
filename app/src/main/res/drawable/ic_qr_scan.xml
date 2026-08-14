@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Scan-a-QR mark: three finder squares and a sweep line, matching the icon set's 24dp grid
+     and 2dp stroke weight. Drawn rather than imported so it tints from the theme like the rest. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFF">
+    <!-- corner brackets -->
+    <path android:fillColor="@android:color/white"
+        android:pathData="M3,3h6v2H5v4H3V3zM15,3h6v6h-2V5h-4V3zM3,15h2v4h4v2H3V15zM19,15h2v6h-6v-2h4V15z"/>
+    <!-- finder squares -->
+    <path android:fillColor="@android:color/white"
+        android:pathData="M7,7h3v3H7V7zM14,7h3v3h-3V7zM7,14h3v3H7V14z"/>
+    <!-- sweep -->
+    <path android:fillColor="@android:color/white"
+        android:pathData="M13.5,13.5h3.5v1.6h-3.5zM13.5,16.4h1.6v1.6h-1.6zM15.9,16.4h1.6v1.6h-1.6z"/>
+</vector>

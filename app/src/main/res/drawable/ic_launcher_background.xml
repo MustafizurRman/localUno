@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Imported from Claude Design project "Local UNO game UI design": assets/app-icon.svg
+     The design's icon plate: a diagonal #20233a -> #161826 gradient. Kept at the source's 512
+     viewport so the geometry matches the SVG 1:1; Android scales it to whatever density is asked.
+     No corner radius here - the adaptive-icon mask supplies the launcher's own shape. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <path android:pathData="M0,0h512v512h-512z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="0"
+                android:endX="512"
+                android:endY="512"
+                android:startColor="#20233A"
+                android:endColor="#161826" />
+        </aapt:attr>
+    </path>
+</vector>

@@ -1,0 +1,387 @@
+package com.mutsho.localuno.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.animation.core.EaseInOutSine
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.getValue
+import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.mutsho.localuno.R
+import com.mutsho.localuno.model.*
+import com.mutsho.localuno.model.Direction
+import com.mutsho.localuno.ui.theme.*
+
+/**
+ * The board's fixed vertical rhythm, identical in all three skins per UnoBoard.dc.html:
+ *
+ *   top bar -> move-log strip -> felt (per skin) -> turn row -> hand -> action bar
+ *
+ * Only [felt] and [timer] vary, so each skin supplies just those two and inherits everything else.
+ */
+@Composable
+fun BoardScaffold(
+    gameState: GameState,
+    localPlayerId: String,
+    playableCardIds: Set<Int>,
+    hand: List<Card>,
+    moveLog: List<MoveLogEntry>,
+    logOpen: Boolean,
+    onToggleLog: () -> Unit,
+    showSymbols: Boolean,
+    onPlayCard: (Card) -> Unit,
+    onCallUno: () -> Unit,
+    onSendEmoji: (String) -> Unit,
+    onRequestLeave: () -> Unit,
+    sortHandEnabled: Boolean,
+    onToggleSortHand: () -> Unit,
+    background: Brush,
+    timer: @Composable () -> Unit,
+    felt: @Composable BoxScope.() -> Unit
+) {
+    val localPlayer = gameState.getPlayerById(localPlayerId)
+    val isMyTurn = gameState.currentPlayer?.id == localPlayerId
+    val isSpectating = gameState.isSpectating(localPlayerId)
+    val current = gameState.currentPlayer
+    val hasPlays = hand.any { it.id in playableCardIds }
+
+    Box(modifier = Modifier.fillMaxSize().background(background)) {
+    // heatOn: No Mercy runs with a red inset glow that intensifies with the pending draw stack
+    // (heatShadow = inset 0 0 (60 + pending*4)px), pulsing on ubGlow's 1.2s cycle. Drawn behind
+    // the content and non-interactive.
+    if (gameState.settings.gameMode == GameMode.NO_MERCY) {
+        val heat = rememberInfiniteTransition(label = "heat")
+        val heatAlpha by heat.animateFloat(
+            initialValue = 0.25f,
+            targetValue = 0.8f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1200, easing = EaseInOutSine),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "heatAlpha"
+        )
+        val spread = 60f + gameState.pendingDrawCount * 4f
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(Color.Transparent, UnoRed.copy(alpha = 0.30f * heatAlpha)),
+                        radius = spread * 12f
+                    )
+                )
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.systemBars)
+    ) {
+        BoardTopBar(
+            chipLabel = gameState.settings.gameMode.displayName.uppercase(),
+            chipBg = Accent800,
+            chipFg = Accent200,
+            chipEdge = Accent700,
+            subLabel = "${gameState.players.count { it.isConnected }} playing · ${gameState.drawPile.size} in deck",
+            logOpen = logOpen,
+            onToggleLog = onToggleLog,
+            onRequestLeave = onRequestLeave
+        )
+
+        MoveLogStrip(log = moveLog, logOpen = logOpen)
+
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) { felt() }
+
+        BoardTurnRow(
+            turnTitle = if (isMyTurn) "YOUR TURN" else "${current?.name ?: "…"}'s turn",
+            turnTitleColor = if (isMyTurn) UnoYellow else NocturneText,
+            turnTitleSize = if (isMyTurn) 20.sp else 16.sp,
+            turnSub = when {
+                // Checked before the pause case: a knocked-out player watching a paused table is
+                // still, first and foremost, knocked out - "waiting for a player" would read as
+                // though they were about to get another turn.
+                isSpectating -> "You're out — watching the rest"
+                gameState.phase == GamePhase.PAUSED_DISCONNECT -> "Paused — waiting for a player"
+                gameState.pendingDrawCount > 0 && isMyTurn -> "Stack it or take +${gameState.pendingDrawCount}"
+                isMyTurn && !hasPlays -> "Nothing playable"
+                // The dial replaced drag-to-play: only the card under the needle is playable, and a
+                // tap anywhere else spins rather than plays. Copy that still said "drag a card up"
+                // would be describing an interaction the board no longer has.
+                isMyTurn -> "Spin the dial · tap the top card"
+                else -> "${current?.cardCount ?: 0} cards in hand"
+            },
+            sortLabel = if (sortHandEnabled) "SORTED" else "SORT",
+            onSortHand = onToggleSortHand,
+            timer = timer
+        )
+
+        HandArc(
+            hand = hand,
+            playableCardIds = playableCardIds,
+            isMyTurn = isMyTurn,
+            // The 0 and 7 faces carry a pip stating those rules, so the face has to know whether
+            // this table actually plays them.
+            rules = gameState.settings.rules,
+            showSymbols = showSymbols,
+            // "WAITING" implies a turn is coming. For a knocked-out player it never is.
+            idleHint = when {
+                isSpectating -> "knocked out — watching"
+                gameState.phase == GamePhase.PAUSED_DISCONNECT -> "paused"
+                else -> "waiting for your turn"
+            },
+            onPlayCard = onPlayCard,
+            // The dial is a fixed share of the screen rather than a function of hand size: its
+            // whole point is that forty cards occupy exactly the room four do.
+            //
+            // Half the design's own 392-of-844. The source devotes that stage to a screen holding
+            // nothing but a discard pile; this board also carries a top bar, the move log, the felt
+            // with every opponent on it, the turn row and the action bar, and at 46% the hand was
+            // squeezing all of them. The dial absorbs the cut better than the old fan could,
+            // because it only ever shows about five cards - it is the empty band of dial below the
+            // hand that goes, not the cards themselves. See DESIGN_CARD_BASE.
+            modifier = Modifier.height(
+                (LocalConfiguration.current.screenHeightDp * 196f / 844f).dp
+            )
+        )
+
+        BoardActionBar(
+            // TWO cards, not one: the call is a declaration made before the play that leaves you
+            // on your last card. Armed at one card it was a formality tapped after the fact - see
+            // GameEngine.callUno.
+            canCallUno = localPlayer?.cardCount == 2 && localPlayer.hasCalledUno != true,
+            hasCalledUno = localPlayer?.hasCalledUno == true,
+            onCallUno = onCallUno,
+            onSendEmoji = onSendEmoji
+        )
+    }
+    }
+}
+
+/** Face-down deck with its count caption. */
+@Composable
+fun DrawPile(
+    enabled: Boolean,
+    onDraw: () -> Unit,
+    width: Dp,
+    height: Dp,
+    caption: String,
+    /**
+     * True when this player is genuinely stuck - their turn, and not one card in hand can be
+     * played. Distinct from [enabled], which is also true while a draw stack is pending, because
+     * that case is a CHOICE (stack it or take the penalty) and does not want to be shouted at.
+     *
+     * Everything below exists because the board had no answer to "what do I do now". A player who
+     * cannot play sees a hand where nothing lights up and a deck that looks exactly as inert as it
+     * did a moment ago; the only text saying otherwise was two words in the turn row. Someone who
+     * has never played this app has no reason to know the deck is even tappable.
+     */
+    mustDraw: Boolean = false
+) {
+    val nudge = rememberInfiniteTransition(label = "drawNudge")
+    // Slow enough to read as breathing rather than blinking - it has to be noticeable without
+    // becoming the thing you are trying to ignore while you think.
+    val pulse by nudge.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1100, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "drawPulse"
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.then(if (enabled) Modifier.clickable { onDraw() } else Modifier)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            if (mustDraw) {
+                // A halo that grows out past the card, so the pull is visible even to someone
+                // whose eyes are on their own hand rather than the middle of the table.
+                Box(
+                    modifier = Modifier
+                        .size(width = width + 34.dp, height = height + 34.dp)
+                        .drawBehind {
+                            drawRoundRect(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        UnoYellow.copy(alpha = 0.34f * (0.35f + pulse)),
+                                        Color.Transparent
+                                    ),
+                                    center = Offset(size.width / 2f, size.height / 2f),
+                                    radius = size.minDimension * 0.85f
+                                ),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                                    24.dp.toPx(), 24.dp.toPx()
+                                )
+                            )
+                        }
+                )
+            }
+            Box(
+                modifier = if (mustDraw) {
+                    Modifier.graphicsLayer {
+                        val s = 1f + 0.05f * pulse
+                        scaleX = s
+                        scaleY = s
+                    }
+                } else Modifier
+            ) {
+                UnoCardBack(width = width, height = height)
+            }
+        }
+
+        if (mustDraw) {
+            Text(
+                "TAP TO DRAW",
+                color = UnoYellow,
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp,
+                modifier = Modifier.alpha(0.65f + 0.35f * pulse)
+            )
+        }
+        Text(caption, color = Neutral500, fontSize = 9.sp)
+    }
+}
+
+/** The discard slot: a dashed target underneath, with the top card sitting on it. */
+@Composable
+fun DiscardSlot(
+    gameState: GameState,
+    isMyTurn: Boolean,
+    showSymbols: Boolean,
+    width: Dp,
+    height: Dp,
+    rotationDeg: Float = 0f
+) {
+    Box(modifier = Modifier.size(width, height)) {
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .border(
+                    width = 1.5.dp,
+                    color = if (isMyTurn) NocturneAccent.copy(alpha = 0.7f) else Color.White.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(8.dp)
+                )
+        )
+        gameState.topCard?.let { top ->
+            // ubBurst: the landing card pops in (scale .4 -> 1.12 -> 1, rotate -9 -> 0) each time
+            // the discard changes. This is the design's `flying` moment reduced to its visible
+            // payoff - a full hand-to-pile flight would need the card's on-screen origin, which
+            // the fanned layout doesn't expose to the felt.
+            val burst = remember(top.id) { Animatable(0f) }
+            LaunchedEffect(top.id) {
+                burst.snapTo(0f)
+                burst.animateTo(1f, tween(350))
+            }
+            val b = burst.value
+            val burstScale = when {
+                b < 0.55f -> 0.4f + (1.12f - 0.4f) * (b / 0.55f)
+                else -> 1.12f - 0.12f * ((b - 0.55f) / 0.45f)
+            }
+            val burstRot = -9f + 9f * b
+            Box(
+                modifier = Modifier.graphicsLayer {
+                    rotationZ = rotationDeg + burstRot
+                    scaleX = burstScale
+                    scaleY = burstScale
+                    alpha = (b / 0.3f).coerceAtMost(1f)
+                }
+            ) {
+                BoardCardFace(
+                    card = top,
+                    rules = gameState.settings.rules,
+                    showSymbols = showSymbols,
+                    dimmed = false,
+                    width = width,
+                    height = height
+                )
+            }
+        }
+    }
+}
+
+/** Play-direction glyph. Handed artwork, so the drawable is swapped rather than mirrored. */
+@Composable
+fun DirectionGlyph(direction: Direction, size: Dp, alpha: Float = 1f) {
+    Icon(
+        painter = painterResource(
+            if (direction == Direction.CLOCKWISE) R.drawable.ic_clockwise
+            else R.drawable.ic_counter_clockwise
+        ),
+        contentDescription = if (direction == Direction.CLOCKWISE) "Play order: clockwise"
+        else "Play order: counter-clockwise",
+        tint = Color.White.copy(alpha = alpha),
+        modifier = Modifier.size(size)
+    )
+}
+
+fun colorFor(color: CardColor): Color = when (color) {
+    CardColor.RED -> UnoRed
+    CardColor.YELLOW -> UnoYellow
+    CardColor.GREEN -> UnoGreen
+    CardColor.BLUE -> UnoBlue
+    CardColor.WILD -> Neutral700
+}
+
+/**
+ * "+2 with +2" style hint under a live draw stack.
+ *
+ * Derived from the card actually on the pile rather than from the running total, and only claims a
+ * match is possible when one really is. It used to read "MATCH +${total}" off the accumulated
+ * penalty, so a +4 answered by a +2 advertised "MATCH +6" - a card that cannot answer anything -
+ * and a +10, which nothing may ever answer, still told the player to match it.
+ */
+fun stackHint(gameState: GameState): String {
+    val penalty = gameState.topCard ?: return "DRAW OR PASS"
+    val total = gameState.pendingDrawCount
+    if (!gameState.settings.rules.stacking) return "TAKE +$total"
+    // Anything that can answer a penalty can answer itself, so this is the honest test for
+    // "is there a card in the deck that gets you out of this".
+    val answerable = Card.canStack(penalty.type, penalty.type)
+    return if (answerable) "MATCH +${Card.drawValue(penalty.type)} OR DRAW" else "NO ANSWER — TAKE +$total"
+}
+
+/** 3dp coloured stripe on one edge of a rail seat. */
+fun Modifier.drawEdgeStripe(color: Color, leftEdge: Boolean): Modifier = this.drawBehind {
+    if (color == Color.Transparent) return@drawBehind
+    val w = 3.dp.toPx()
+    drawRect(
+        color = color,
+        topLeft = if (leftEdge) Offset.Zero else Offset(size.width - w, 0f),
+        size = Size(w, size.height)
+    )
+}
+
+fun Modifier.alphaIf(condition: Boolean, value: Float): Modifier =
+    if (condition) this.alpha(value) else this

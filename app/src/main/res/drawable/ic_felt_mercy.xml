@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No Mercy felt swatch for ModeSelectScreen's sticky-footer preview. Same radial-gradient
+     technique as ic_felt_classic.xml; colours match MercyBoardScreen.kt's existing felt
+     (#5C1018 -> #280309), not re-derived from felt-mercy.svg directly. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="34dp"
+    android:height="34dp"
+    android:viewportWidth="400"
+    android:viewportHeight="520">
+    <path android:pathData="M0,30a30,30 0 0 1 30,-30h340a30,30 0 0 1 30,30v460a30,30 0 0 1 -30,30h-340a30,30 0 0 1 -30,-30z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="200"
+                android:centerY="218"
+                android:gradientRadius="312"
+                android:startColor="#FF5C1018"
+                android:endColor="#FF280309" />
+        </aapt:attr>
+    </path>
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#12FFFFFF"
+        android:strokeWidth="1"
+        android:pathData="M1,31a29,29 0 0 1 29,-29h338a29,29 0 0 1 29,29v458a29,29 0 0 1 -29,29h-338a29,29 0 0 1 -29,-29z" />
+</vector>

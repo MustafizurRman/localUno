@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Imported from Claude Design project "Local UNO game UI design": assets/app-icon.svg
+     A -14 degree diagonal stack of three cards (blue/yellow ghosted behind a solid red front card
+     with an inset cream keyline), plus the design's concentric "broadcast" rings in the top-right
+     that nod to local network play.
+
+     Two deliberate departures from the source SVG:
+      - The whole composition is scaled to 78% about centre. app-icon.svg is a complete 512px icon
+        with its own plate; an adaptive foreground only gets the central ~313/512 safe zone, and at
+        full size the broadcast rings would be cropped off by rounder launcher masks.
+      - The tiny "UNO" wordmark inside the oval is omitted: vector drawables have no <text> support,
+        and at launcher size it renders as a few illegible pixels anyway. The cream oval plus the
+        keyline still read unmistakably as a UNO card. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <group
+        android:pivotX="256"
+        android:pivotY="256"
+        android:scaleX="0.78"
+        android:scaleY="0.78">
+
+        <group
+            android:pivotX="256"
+            android:pivotY="256"
+            android:rotation="-14">
+
+            <!-- Back card -->
+            <path
+                android:fillColor="#0072BC"
+                android:fillAlpha="0.5"
+                android:pathData="M168,118h114a18,18 0 0 1 18,18v178a18,18 0 0 1 -18,18h-114a18,18 0 0 1 -18,-18v-178a18,18 0 0 1 18,-18z" />
+            <!-- Middle card -->
+            <path
+                android:fillColor="#FFDE00"
+                android:fillAlpha="0.65"
+                android:pathData="M194,140h114a18,18 0 0 1 18,18v178a18,18 0 0 1 -18,18h-114a18,18 0 0 1 -18,-18v-178a18,18 0 0 1 18,-18z" />
+            <!-- Front card -->
+            <path
+                android:fillColor="#ED1C24"
+                android:pathData="M220,162h114a18,18 0 0 1 18,18v178a18,18 0 0 1 -18,18h-114a18,18 0 0 1 -18,-18v-178a18,18 0 0 1 18,-18z" />
+            <!-- Inset keyline on the front card -->
+            <path
+                android:fillColor="#00000000"
+                android:strokeColor="#F2EFE6"
+                android:strokeWidth="9"
+                android:pathData="M222,170h110a12,12 0 0 1 12,12v154a12,12 0 0 1 -12,12h-110a12,12 0 0 1 -12,-12v-154a12,12 0 0 1 12,-12z" />
+            <!-- Cream oval plaque -->
+            <group
+                android:pivotX="277"
+                android:pivotY="269"
+                android:rotation="-20">
+                <path
+                    android:fillColor="#F7F5EF"
+                    android:pathData="M277,269m-52,0a52,31 0 1,0 104,0a52,31 0 1,0 -104,0" />
+            </group>
+        </group>
+
+        <!-- Broadcast rings: local multiplayer, signalling out from the deck -->
+        <path
+            android:fillColor="#9184D9"
+            android:pathData="M404,118m-9,0a9,9 0 1,0 18,0a9,9 0 1,0 -18,0" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#9184D9"
+            android:strokeAlpha="0.45"
+            android:strokeWidth="2"
+            android:pathData="M404,118m-20,0a20,20 0 1,0 40,0a20,20 0 1,0 -40,0" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#9184D9"
+            android:strokeAlpha="0.2"
+            android:strokeWidth="2"
+            android:pathData="M404,118m-32,0a32,32 0 1,0 64,0a32,32 0 1,0 -64,0" />
+    </group>
+</vector>

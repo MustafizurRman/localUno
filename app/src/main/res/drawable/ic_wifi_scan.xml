@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Imported from Claude Design project "Local UNO game UI design": assets/wifi.svg
+     Concentric broadcast rings, used as the "scanning for lobbies" motif. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    <path
+        android:fillColor="#9184D9"
+        android:pathData="M60,60m-14,0a14,14 0 1,0 28,0a14,14 0 1,0 -28,0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#9184D9"
+        android:strokeAlpha="0.5"
+        android:strokeWidth="2"
+        android:pathData="M60,60m-30,0a30,30 0 1,0 60,0a30,30 0 1,0 -60,0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#9184D9"
+        android:strokeAlpha="0.3"
+        android:strokeWidth="2"
+        android:pathData="M60,60m-45,0a45,45 0 1,0 90,0a45,45 0 1,0 -90,0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#9184D9"
+        android:strokeAlpha="0.15"
+        android:strokeWidth="2"
+        android:pathData="M60,60m-59,0a59,59 0 1,0 118,0a59,59 0 1,0 -118,0" />
+</vector>

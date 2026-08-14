@@ -1,0 +1,22 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Claude Code's per-machine permission allowlist. Local by name and by nature - it holds absolute
+# paths from this machine and says nothing about the project.
+/.claude/settings.local.json
+
+# SonarLint's local analysis cache: generated binary blobs, regenerated on demand.
+/.idea/sonarlint/

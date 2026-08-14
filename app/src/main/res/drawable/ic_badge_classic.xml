@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Imported from Claude Design project: assets/badge-classic.svg -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="68dp"
+    android:height="96dp"
+    android:viewportWidth="68"
+    android:viewportHeight="96">
+    <path android:fillColor="#FF1A1C2B" android:pathData="M0,9a9,9 0 0 1 9,-9h50a9,9 0 0 1 9,9v78a9,9 0 0 1 -9,9h-50a9,9 0 0 1 -9,-9z" />
+    <path android:fillColor="#FF0072BC" android:pathData="M9,14a5,5 0 0 1 5,-5h40a5,5 0 0 1 5,5v68a5,5 0 0 1 -5,5h-40a5,5 0 0 1 -5,-5z" />
+    <path android:fillColor="#FFF7F5EF" android:pathData="M34,48m-15,0a15,15 0 1,0 30,0a15,15 0 1,0 -30,0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFF2EFE6"
+        android:strokeWidth="4"
+        android:pathData="M10,3.5h48a6.5,6.5 0 0 1 6.5,6.5v76a6.5,6.5 0 0 1 -6.5,6.5h-48a6.5,6.5 0 0 1 -6.5,-6.5v-76a6.5,6.5 0 0 1 6.5,-6.5z" />
+</vector>

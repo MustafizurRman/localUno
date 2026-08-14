@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Imported from Claude Design project "Local UNO game UI design": assets/icons/sort.svg
+     Nocturne icon style: 24dp grid, stroke-only, width 1.75, round caps/joins.
+     Tinted at runtime by the caller, so the stroke colour here is just a sane default. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFC8C9D4"
+        android:strokeWidth="1.75"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4,7h11" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFC8C9D4"
+        android:strokeWidth="1.75"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4,12h8" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFC8C9D4"
+        android:strokeWidth="1.75"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4,17h5" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFC8C9D4"
+        android:strokeWidth="1.75"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M18,6v12" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFC8C9D4"
+        android:strokeWidth="1.75"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M15.5,15.5L18,18l2.5,-2.5" />
+</vector>

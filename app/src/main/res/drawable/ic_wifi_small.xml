@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Imported from Claude Design project: assets/icons/wifi-small.svg -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:fillColor="#00000000" android:strokeColor="#FFC8C9D4" android:strokeWidth="1.75" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M3,9.5a13,13 0 0 1 18,0" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFC8C9D4" android:strokeWidth="1.75" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M6.2,13a8.6,8.6 0 0 1 11.6,0" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFC8C9D4" android:strokeWidth="1.75" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M9.4,16.4a4.2,4.2 0 0 1 5.2,0" />
+    <path android:fillColor="#FFC8C9D4" android:pathData="M12,19.6m-1.2,0a1.2,1.2 0 1,0 2.4,0a1.2,1.2 0 1,0 -2.4,0" />
+</vector>

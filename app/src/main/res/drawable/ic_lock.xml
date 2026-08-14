@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Imported from Claude Design project "Local UNO game UI design": assets/icons/lock.svg
+     Nocturne icon style: 24dp grid, stroke-only, width 1.75, round caps/joins. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFC8C9D4"
+        android:strokeWidth="1.75"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M7,10.5h10a2.5,2.5 0 0,1 2.5,2.5v5a2.5,2.5 0 0,1 -2.5,2.5h-10a2.5,2.5 0 0,1 -2.5,-2.5v-5a2.5,2.5 0 0,1 2.5,-2.5z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFC8C9D4"
+        android:strokeWidth="1.75"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M8.5,10.5V8a3.5,3.5 0 0 1 7,0v2.5" />
+</vector>

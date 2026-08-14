@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon (Android 13+) layer. The monochrome layer gets flattened to a single system tint,
+     so it must read as one clean silhouette - pointing this at the colour card fan would merge all
+     three overlapping cards into a shapeless blob. This is a single upright card with the oval
+     punched out via evenOdd, which still reads as "UNO" at launcher size in one flat colour. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M42,30h24a6,6 0 0 1 6,6v36a6,6 0 0 1 -6,6h-24a6,6 0 0 1 -6,-6v-36a6,6 0 0 1 6,-6zM54,54m-12,0a12,7 0 1,0 24,0a12,7 0 1,0 -24,0" />
+</vector>
