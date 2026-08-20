@@ -19,7 +19,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,6 +33,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mutsho.localuno.model.GameState
@@ -67,19 +71,40 @@ fun HandTransferOverlay(gameState: GameState, localPlayerId: String) {
     // Keyed on the transfer's id, so each distinct transfer plays exactly once. A state update that
     // carries the same (already-played) descriptor re-composes without restarting anything.
     val progress = remember(transfer.id) { Animatable(0f) }
+
+    // Whether the animation has run its course, as ORDINARY state written once at the end.
+    //
+    // This used to be `progress.value < 1f`, which reads an animating value during composition to
+    // decide whether to emit anything at all. That is the defect that killed this app once already,
+    // in HandArc: a composition subscribed to a value rewritten every frame. It does not fail where
+    // it is written - it takes down a later frame from inside the Compose runtime with an empty
+    // group stack at `endRoot` and no application code on the trace.
+    //
+    // Reading it here was worse than in HandArc, because it decides STRUCTURE rather than a number:
+    // the subtree is torn out at the exact frame the animation lands. Written this way the structure
+    // changes exactly once, from an ordinary state write, and nothing composed reads `progress`.
+    var finished by remember(transfer.id) { mutableStateOf(false) }
     LaunchedEffect(transfer.id) {
+        finished = false
         progress.snapTo(0f)
         progress.animateTo(1f, tween(durationMillis = totalDurationMs(transfer), easing = LinearEasing))
+        finished = true
     }
-    if (progress.value >= 1f) return
-
     val participants = transfer.order.mapNotNull { id -> gameState.getPlayerById(id) }
     // A transfer naming players this device doesn't know about is not something to half-draw.
-    if (participants.size != transfer.order.size || participants.size < 2) return
+    val drawable = !finished &&
+        participants.size == transfer.order.size && participants.size >= 2
 
-    val t = progress.value
-    // Fade the whole thing in and out so it arrives and leaves softly instead of popping.
-    val sceneAlpha = when {
+    // Emission is wrapped, never skipped with an early `return` after remember/LaunchedEffect.
+    // Returning partway makes this composable's group structure differ between frames, and driven
+    // by an animating value that is a structure changing under the composer many times a second.
+    // The failure surfaces far from here - IndexOutOfBoundsException at Stack.pop /
+    // ComposerImpl.endRoot, with no application code on the stack.
+    if (drawable) {
+
+    // Fade the whole thing in and out so it arrives and leaves softly instead of popping. Read in
+    // the draw phase only - see `finished` above for why this must not be read in composition.
+    fun sceneAlphaAt(t: Float): Float = when {
         t < 0.12f -> t / 0.12f
         t > 0.86f -> (1f - t) / 0.14f
         else -> 1f
@@ -88,8 +113,8 @@ fun HandTransferOverlay(gameState: GameState, localPlayerId: String) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF05050F).copy(alpha = 0.72f * sceneAlpha))
-            .graphicsLayer { alpha = sceneAlpha },
+            .background(Color(0xFF05050F).copy(alpha = 0.72f))
+            .graphicsLayer { alpha = sceneAlphaAt(progress.value) },
         contentAlignment = Alignment.Center
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -115,8 +140,12 @@ fun HandTransferOverlay(gameState: GameState, localPlayerId: String) {
             // ── The travelling card packets ─────────────────────────────────
             // Each participant hands off to the NEXT one in the cycle (see HandTransfer.order), so
             // one loop covers both shapes: for two players that's simply A->B and B->A.
-            val travel = ((t - 0.16f) / 0.62f).coerceIn(0f, 1f)
-            val eased = travel * travel * (3f - 2f * travel)   // smoothstep - ease in and out
+            // smoothstep - ease in and out. A function of the clock, not a value captured from it:
+            // every caller below evaluates this inside a layout or draw lambda.
+            fun easedAt(t: Float): Float {
+                val travel = ((t - 0.16f) / 0.62f).coerceIn(0f, 1f)
+                return travel * travel * (3f - 2f * travel)
+            }
             participants.indices.forEach { i ->
                 val from = seatOffset(i)
                 val to = seatOffset((i + 1) % participants.size)
@@ -126,16 +155,24 @@ fun HandTransferOverlay(gameState: GameState, localPlayerId: String) {
                 val midY = (from.second + to.second) / 2
                 val bowX = (midX - centreX) * 0.55f
                 val bowY = (midY - centreY) * 0.55f
-                val x = quadratic(from.first, midX + bowX, to.first, eased)
-                val y = quadratic(from.second, midY + bowY, to.second, eased)
 
                 CardPacket(
                     modifier = Modifier
-                        .offset(x = x - 15.dp, y = y - 21.dp)
+                        // offset {} rather than offset(x, y): the lambda overload is the LAYOUT
+                        // phase, so the packet moves each frame without recomposing anything. The
+                        // Dp overload would rebuild this modifier chain 60 times a second.
+                        .offset {
+                            val e = easedAt(progress.value)
+                            IntOffset(
+                                (quadratic(from.first, midX + bowX, to.first, e) - 15.dp).roundToPx(),
+                                (quadratic(from.second, midY + bowY, to.second, e) - 21.dp).roundToPx()
+                            )
+                        }
                         .graphicsLayer {
-                            rotationZ = 360f * eased * (if (transfer.isRotation) 1f else 0.5f)
+                            val e = easedAt(progress.value)
+                            rotationZ = 360f * e * (if (transfer.isRotation) 1f else 0.5f)
                             // Lifts off, travels large, settles - gives the packet some weight.
-                            val s = 0.7f + 0.45f * kotlin.math.sin(eased * PI).toFloat()
+                            val s = 0.7f + 0.45f * kotlin.math.sin(e * PI).toFloat()
                             scaleX = s
                             scaleY = s
                         }
@@ -145,13 +182,16 @@ fun HandTransferOverlay(gameState: GameState, localPlayerId: String) {
             // ── The seats themselves, drawn over the packets so arrivals land "behind" them ──
             participants.forEachIndexed { i, player ->
                 val (x, y) = seatOffset(i)
-                // Each seat pulses as its own packet leaves, then as one arrives.
-                val give = pulseAt(t, 0.16f)
-                val take = pulseAt(t, 0.72f)
                 TransferSeat(
                     player = player,
                     isYou = player.id == localPlayerId,
-                    emphasis = maxOf(give, take),
+                    // A lambda, not a Float: each seat pulses as its own packet leaves and again as
+                    // one arrives, so this changes every frame. Passed as a value it would recompose
+                    // every seat 60 times a second.
+                    emphasis = {
+                        val t = progress.value
+                        maxOf(pulseAt(t, 0.16f), pulseAt(t, 0.72f))
+                    },
                     modifier = Modifier.offset(x = x - 34.dp, y = y - 34.dp)
                 )
             }
@@ -179,6 +219,7 @@ fun HandTransferOverlay(gameState: GameState, localPlayerId: String) {
                 )
             }
         }
+    }
     }
 }
 
@@ -235,7 +276,8 @@ private fun CardPacket(modifier: Modifier = Modifier) {
 private fun TransferSeat(
     player: Player,
     isYou: Boolean,
-    emphasis: Float,
+    /** Read in the draw phase only - see [HandTransferOverlay]'s `finished` for why. */
+    emphasis: () -> Float,
     modifier: Modifier = Modifier
 ) {
     val avatar = AvatarColors.getOrElse(player.avatarColor % AvatarColors.size) { AvatarColors[0] }
@@ -245,11 +287,18 @@ private fun TransferSeat(
     ) {
         Box(contentAlignment = Alignment.Center) {
             // Flare ring - grows and fades with the pulse.
-            if (emphasis > 0f) {
-                Canvas(modifier = Modifier.size(58.dp)) {
+            //
+            // ALWAYS composed, and drawn or not drawn inside the draw lambda. This was an
+            // `if (emphasis > 0f)` around the Canvas, which added and removed a child of this Box
+            // twice per animation per seat, driven by a value changing every frame. A composition
+            // whose shape is animated is the exact failure this app already died of once; see
+            // `finished` in HandTransferOverlay. Skipping the draw costs nothing.
+            Canvas(modifier = Modifier.size(58.dp)) {
+                val e = emphasis()
+                if (e > 0f) {
                     drawCircle(
-                        color = NocturneAccent.copy(alpha = 0.55f * emphasis),
-                        radius = size.minDimension / 2 * (0.75f + 0.35f * emphasis),
+                        color = NocturneAccent.copy(alpha = 0.55f * e),
+                        radius = size.minDimension / 2 * (0.75f + 0.35f * e),
                         style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f)
                     )
                 }

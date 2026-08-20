@@ -99,15 +99,12 @@ fun SideRailsBoardScreen(
                 modifier = Modifier.weight(1f).fillMaxHeight(),
                 contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(220.dp)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.radialGradient(
-                                listOf(colorFor(gameState.currentColor).copy(alpha = 0.22f), Color.Transparent)
-                            )
-                        )
+                // Was a flat 0.22-alpha wash that never changed and never reacted. The aura is
+                // stronger, crossfades between colours and flares on a switch - which is the whole
+                // point, since the moment that needs announcing is a wild changing the colour.
+                ActiveColourAura(
+                    color = gameState.currentColor,
+                    modifier = Modifier.size(260.dp)
                 )
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -122,7 +119,11 @@ fun SideRailsBoardScreen(
                             // enforces the same rule, so leaving this enabled would just be a button
                             // that silently does nothing. A live draw stack is the exception: taking
                             // the penalty is a real choice even when you could stack instead.
-                            enabled = isMyTurn && (!hasPlays || gameState.pendingDrawCount > 0),
+                            // Always live on your own turn. It used to be gated on having nothing
+                            // playable, which made the deck unresponsive exactly when a player was
+                            // deciding whether to spend a card or take one - a choice the game
+                            // should let them make. GameEngine caps it at one voluntary draw a turn.
+                            enabled = isMyTurn,
                             onDraw = onDrawCard,
                             width = 58.dp,
                             height = 86.dp,
@@ -174,11 +175,11 @@ fun SideRailsBoardScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        Text(
-                            "ACTIVE COLOUR · ${gameState.currentColor.name}",
-                            color = Neutral600,
-                            fontSize = 9.sp,
-                            letterSpacing = 2.sp
+                        // `ACTIVE COLOUR · YELLOW` in 9sp Neutral600 - dark grey, nine pixels
+                        // tall, on a dark felt. It named the right thing and nobody could read it.
+                        ActiveColourBanner(
+                            color = gameState.currentColor,
+                            showSymbols = showSymbols
                         )
                         DirectionGlyph(gameState.direction, size = 12.dp, alpha = 0.7f)
                     }

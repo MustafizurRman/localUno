@@ -285,7 +285,10 @@ fun BoardActionBar(
         }
 
         val pulse = rememberInfiniteTransition(label = "unoPulse")
-        val scale by pulse.animateFloat(
+        // State, not `by`: delegating reads the animation in composition, so this button could
+        // only animate by recomposing every frame for the whole round. Read inside graphicsLayer
+        // below instead. See BoardScaffold's `heatAlpha` for what that costs.
+        val scale = pulse.animateFloat(
             initialValue = 1f,
             targetValue = if (canCallUno) 1.06f else 1f,
             animationSpec = infiniteRepeatable(
@@ -309,7 +312,7 @@ fun BoardActionBar(
             verticalArrangement = Arrangement.Center,
             modifier = Modifier
                 .height(46.dp)
-                .graphicsLayer { scaleX = scale; scaleY = scale }
+                .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
                 .clip(RoundedCornerShape(if (canCallUno) 23.dp else 12.dp))
                 .background(bg)
                 .then(

@@ -37,6 +37,23 @@ data class GameRules(
     val sevenSwaps: Boolean = false
 )
 
+/**
+ * What happens to a player who lets the turn clock run out.
+ *
+ * There was no such thing before, and no code path either: the timeout handler called
+ * `drawCardForPlayer`, which refuses to draw for anyone holding a playable card, so it returned the
+ * state untouched and the turn never moved. A table whose current player walked away simply stopped,
+ * with the clock at zero and no way forward but leaving the game.
+ *
+ * [SKIP] is the default and the only behaviour Classic gets - losing your turn is the natural
+ * penalty for not taking it, and it needs no explanation at the table. [DRAW_ONE] is the harsher
+ * house version, offered on a custom table.
+ */
+enum class TimeoutAction(val label: String, val blurb: String) {
+    SKIP("Skip the turn", "The clock runs out and play moves on."),
+    DRAW_ONE("Draw one card", "The clock runs out, they take a card, and play moves on.")
+}
+
 data class GameSettings(
     val gameMode: GameMode = GameMode.CLASSIC,
     val maxPlayers: Int = 6,
@@ -51,7 +68,9 @@ data class GameSettings(
     // game's rule and was previously a hardcoded constant on GameEngine with no way to change it
     // per table; kept here in `model` rather than referencing that constant directly so this file
     // doesn't have to depend on `engine`.
-    val mercyThreshold: Int = 25
+    val mercyThreshold: Int = 25,
+    /** What the clock does to whoever let it run out. See [TimeoutAction]. */
+    val turnTimeoutAction: TimeoutAction = TimeoutAction.SKIP
 )
 
 /**
@@ -97,7 +116,18 @@ data class GameState(
     val handTransfer: HandTransfer? = null,
     val disconnectCountdown: Int = 30,
     val roundStartTime: Long = 0L,
-    val turnStartedAtMillis: Long = 0L
+    val turnStartedAtMillis: Long = 0L,
+    /**
+     * Who has already taken their one voluntary draw this turn.
+     *
+     * Drawing used to be refused outright whenever you held a playable card, which is not the rule
+     * anyone plays by - you may always choose to take a card rather than commit a good one. The
+     * refusal existed to close a real exploit: a drawn playable card keeps the turn, so with
+     * unlimited draws a player could fish the deck all turn and stop whenever they liked.
+     *
+     * Capping it at one draw per turn closes that without taking the choice away.
+     */
+    val voluntaryDrawBy: String? = null
 ) {
     val topCard: Card? get() = discardPile.lastOrNull()
     val currentPlayer: Player? get() = players.getOrNull(currentPlayerIndex)

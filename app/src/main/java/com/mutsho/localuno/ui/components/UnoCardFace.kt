@@ -2,6 +2,7 @@ package com.mutsho.localuno.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -92,12 +94,20 @@ fun UnoCardFace(
         val w = maxWidth
         val density = LocalDensity.current
         val art = cardArt(card)
+        // The skin arrives by CompositionLocal - see LocalCardSkin for why it is not a parameter.
+        val skin = LocalCardSkin.current
+        val style = styleFor(skin)
+        val suit = colorFor(card.color)
+        val suitLine = if (skin == CardSkin.NOIR) noirLineTone(suit) else suit
+        // The suit itself for every skin that asks for it. Only Noir substitutes its lighter
+        // glyph tone, which is what makes its numerals read as lit rather than painted.
+        val suitTone = if (skin == CardSkin.NOIR) noirGlyphTone(suit) else suit
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .clip(RoundedCornerShape(w * 0.11f))
-                .background(CardInk)
+                .background(style.bleed)
                 // The near-black frame is a uniform 5.5% bleed on all four sides. CSS resolves
                 // percentage padding against the inline size, so this is 5.5% of WIDTH even on the
                 // top and bottom edges - the frame is visibly thinner top-to-bottom, and matching
@@ -108,12 +118,22 @@ fun UnoCardFace(
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(RoundedCornerShape(w * 0.075f))
-                    .background(Brush.linearGradient(art.field))
+                    .background(
+                        Brush.linearGradient(style.field?.invoke(suit) ?: art.field)
+                    )
+                    // Noir and Neon carry the suit as an inset keyline rather than as the field.
+                    .then(
+                        if (style.keylineWidth > 0f) Modifier.border(
+                            width = w * style.keylineWidth,
+                            color = suitLine.copy(alpha = 0.62f),
+                            shape = RoundedCornerShape(w * 0.075f)
+                        ) else Modifier
+                    )
             ) {
                 val isWild = card.color == CardColor.WILD
                 Canvas(modifier = Modifier.fillMaxSize()) {
-                    drawGloss()
-                    drawVignette()
+                    if (style.glossAlpha > 0f) drawGloss(style.glossAlpha)
+                    if (style.vignetteAlpha > 0f) drawVignette(style.vignetteAlpha)
                     // On a WILD card the oval is FILLED WHITE, and it is the card's whole identity -
                     // the printed card is a black rectangle whose only large feature is that oval
                     // with the colour pinwheel inside it.
@@ -128,19 +148,25 @@ fun UnoCardFace(
                     // is a WHITE numeral, so a white oval underneath would be white-on-white and the
                     // numeral would have to become the card's colour - a restyle of all 64 coloured
                     // faces, not a fix to this one.
-                    if (isWild) {
-                        drawOval(filled = true)
+                    val oval = style.ovalStroke
+                    if (oval == null) {
+                        // Neon has no oval at all - the lit rim is the card.
+                    } else if (isWild && style.fillWildOval) {
+                        drawOval(filled = true, stroke = oval, suit = suitLine)
+                    } else if (isWild) {
+                        // Noir keeps the wild an ink card like every other face - see fillWildOval.
+                        drawOval(filled = false, stroke = oval, suit = suitLine)
                     } else if (!compact) {
                         // A bold stroke crossing the panel corner to corner: a signature motif at
                         // full size, but a dozen overlapping at once is a dozen crossing diagonals
                         // competing with the numbers. Dropped in compact for the same reason as wear.
-                        drawOval(filled = false)
+                        drawOval(filled = false, stroke = oval, suit = suitLine)
                     }
                 }
 
                 // ── Centre ──────────────────────────────────────────────────
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    val centreFraction = if (compact) 0.34f else 0.60f
+                    val centreFraction = if (compact) 0.34f else style.numeralFraction - 0.02f
                     if (art.glyph != null) {
                         Icon(
                             painter = painterResource(art.glyph),
@@ -150,25 +176,41 @@ fun UnoCardFace(
                             tint = Color.Unspecified,
                             modifier = Modifier
                                 .size(w * centreFraction)
-                                .rotate(-13f)
+                                .rotate(style.tilt)
+                                // Glyphs keep their own artwork and are lit from behind rather than
+                                // recoloured - masking them to a flat tint destroys the interior
+                                // detail and leaves a silhouette.
+                                .then(
+                                    if (style.glow > 0f) Modifier.glow(suitTone, w * style.glow)
+                                    else Modifier
+                                )
                         )
                     } else {
                         OutlinedGlyph(
                             text = art.centreText,
                             fontSize = with(density) { (w * (centreFraction + 0.02f)).toSp() },
-                            strokeWidth = with(density) { (w * 0.052f).toPx() },
-                            modifier = Modifier.rotate(-13f)
+                            strokeWidth = with(density) { (w * style.numeral.outlineFraction).toPx() },
+                            numeral = style.numeral,
+                            suitTone = suitTone,
+                            modifier = Modifier
+                                .rotate(style.tilt)
+                                .then(
+                                    if (style.glow > 0f) Modifier.glow(suitTone, w * style.glow)
+                                    else Modifier
+                                )
                         )
                     }
                 }
 
                 // ── Corner indices: top-left upright, bottom-right at 180°. The top-left is the
                 // one doing the work in compact mode - see the parameter doc for why. ──
-                CornerIndex(art, rules, w, density, Alignment.TopStart, false, compact, showSymbols, card.color)
-                CornerIndex(art, rules, w, density, Alignment.BottomEnd, true, compact, showSymbols, card.color)
+                CornerIndex(art, rules, w, density, Alignment.TopStart, false, compact, showSymbols, card.color, style, suitTone)
+                CornerIndex(art, rules, w, density, Alignment.BottomEnd, true, compact, showSymbols, card.color, style, suitTone)
 
                 // ── Wear, on top of everything - full size only ─────────────
-                if (!compact) Canvas(modifier = Modifier.fillMaxSize()) { drawWear() }
+                if (!compact && style.wearAlpha > 0f) {
+                    Canvas(modifier = Modifier.fillMaxSize()) { drawWear(style.wearAlpha) }
+                }
             }
         }
     }
@@ -197,7 +239,13 @@ fun UnoCardFace(
  * learns "triangle = red" exactly once.
  */
 @Composable
-fun ColorSymbol(color: CardColor, size: Dp, modifier: Modifier = Modifier) {
+fun ColorSymbol(
+    color: CardColor,
+    size: Dp,
+    modifier: Modifier = Modifier,
+    /** Fill colour. Defaults to white, which is right on a card face but not on a filled chip. */
+    tint: Color? = null
+) {
     Canvas(modifier = modifier.size(size)) {
         val w = this.size.width
         val h = this.size.height
@@ -253,7 +301,7 @@ fun ColorSymbol(color: CardColor, size: Dp, modifier: Modifier = Modifier) {
             }
         }
         drawPath(path, color = CardInk, style = Stroke(width = stroke))
-        drawPath(path, color = Color.White)
+        drawPath(path, color = tint ?: Color.White)
     }
 }
 
@@ -267,7 +315,9 @@ private fun androidx.compose.foundation.layout.BoxScope.CornerIndex(
     rotated: Boolean,
     compact: Boolean,
     showSymbols: Boolean,
-    cardColor: CardColor
+    cardColor: CardColor,
+    style: CardSkinStyle,
+    suitTone: Color
 ) {
     val pip = rulePip(art, rules)
     // The symbol alone is reason enough to draw this corner: a Wild has no corner text and no
@@ -277,7 +327,7 @@ private fun androidx.compose.foundation.layout.BoxScope.CornerIndex(
     // Compact grows every element here - this corner is the card's whole identity once it's
     // overlapped down to a sliver, so it gets to be as big as the frame comfortably allows rather
     // than staying sized for a card being read whole.
-    val textFraction = if (compact) 0.30f else 0.20f
+    val textFraction = if (compact) 0.30f else style.indexFraction
     val pipFraction = if (compact) 0.16f else 0.12f
     val symbolFraction = if (compact) 0.17f else 0.13f
 
@@ -333,7 +383,13 @@ private fun androidx.compose.foundation.layout.BoxScope.CornerIndex(
                     OutlinedGlyph(
                         text = art.cornerText,
                         fontSize = with(density) { (cardWidth * textFraction).toSp() },
-                        strokeWidth = with(density) { (cardWidth * 0.023f).toPx() }
+                        // Scaled from the centre numeral's outline so a skin that drops the keyline
+                        // there drops it here too - the index is the same mark, smaller.
+                        strokeWidth = with(density) {
+                            (cardWidth * (style.numeral.outlineFraction * 0.44f)).toPx()
+                        },
+                        numeral = style.numeral,
+                        suitTone = suitTone
                     )
                 }
             }
@@ -358,11 +414,20 @@ private fun androidx.compose.foundation.layout.BoxScope.CornerIndex(
  * stroke UNDERNEATH the fill so only its outer half shows. Compose has no paint-order, so the two
  * are drawn as separate Texts in that order - the handoff calls out this exact substitution.
  */
+/**
+ * The centre numeral.
+ *
+ * Classic prints it: white fill inside a heavy ink keyline. Noir lights it instead - the suit's
+ * lighter glyph tone with no keyline at all, which is the single change that stops a black card
+ * reading as a Classic card that has been dimmed. Neon draws it hollow, outline only.
+ */
 @Composable
 private fun OutlinedGlyph(
     text: String,
     fontSize: androidx.compose.ui.unit.TextUnit,
     strokeWidth: Float,
+    numeral: CardSkinStyle.NumeralStyle = CardSkinStyle.NumeralStyle(),
+    suitTone: Color = Color.White,
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
@@ -373,28 +438,57 @@ private fun OutlinedGlyph(
             lineHeight = fontSize * 0.82f,
             textAlign = TextAlign.Center
         )
-        Text(
-            text = text,
-            style = base.copy(
-                color = CardInk,
-                drawStyle = Stroke(width = strokeWidth, join = androidx.compose.ui.graphics.StrokeJoin.Round)
-            ),
-            maxLines = 1
-        )
-        Text(text = text, style = base.copy(color = Color.White), maxLines = 1)
+        val ink = if (numeral.hollow) suitTone else numeral.outline
+        if (ink != null) {
+            Text(
+                text = text,
+                style = base.copy(
+                    color = ink,
+                    drawStyle = Stroke(width = strokeWidth, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+                ),
+                maxLines = 1
+            )
+        }
+        if (!numeral.hollow) {
+            val fill = when {
+                numeral.useSuitTone -> suitTone
+                numeral.fill != null -> numeral.fill
+                else -> Color.White
+            }
+            Text(text = text, style = base.copy(color = fill), maxLines = 1)
+        }
     }
 }
 
 private fun Float.em(size: androidx.compose.ui.unit.TextUnit) = (this * size.value).sp
 
+/**
+ * A suit-coloured bloom behind a mark, so it reads as lit rather than painted.
+ *
+ * Drawn as a soft radial wash behind the content rather than as a blur: Compose has no cheap blur
+ * below API 31, and a card in a fanned hand is small enough that a gradient is indistinguishable
+ * from one - while costing nothing on the dozen cards a hand draws at once.
+ */
+private fun Modifier.glow(color: Color, radius: Dp): Modifier = this.drawBehind {
+    val r = radius.toPx().coerceAtLeast(1f)
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(color.copy(alpha = 0.55f), color.copy(alpha = 0.18f), Color.Transparent),
+            center = Offset(size.width / 2f, size.height / 2f),
+            radius = (size.minDimension / 2f) + r
+        ),
+        radius = (size.minDimension / 2f) + r
+    )
+}
+
 // ── Painting ────────────────────────────────────────────────────────────────────────────────────
 
 /** radial-gradient(58% 44% at 44% 34%, rgba(255,255,255,.26), transparent 72%) */
-private fun DrawScope.drawGloss() {
+private fun DrawScope.drawGloss(strength: Float = 1f) {
     drawRect(
         brush = Brush.radialGradient(
             colorStops = arrayOf(
-                0f to Color.White.copy(alpha = 0.26f),
+                0f to Color.White.copy(alpha = 0.26f * strength),
                 0.72f to Color.Transparent,
                 1f to Color.Transparent
             ),
@@ -405,13 +499,13 @@ private fun DrawScope.drawGloss() {
 }
 
 /** radial-gradient(118% 88% at 50% 50%, transparent 40%, rgba(0,0,0,.4)) */
-private fun DrawScope.drawVignette() {
+private fun DrawScope.drawVignette(strength: Float = 1f) {
     drawRect(
         brush = Brush.radialGradient(
             colorStops = arrayOf(
                 0f to Color.Transparent,
                 0.40f to Color.Transparent,
-                1f to Color.Black.copy(alpha = 0.4f)
+                1f to Color.Black.copy(alpha = 0.4f * strength)
             ),
             center = Offset(size.width / 2f, size.height / 2f),
             radius = size.width * 1.18f
@@ -427,7 +521,11 @@ private fun DrawScope.drawVignette() {
  * `preserveAspectRatio="none"` - so the oval is genuinely non-uniformly scaled rather than fitted,
  * which is what puts its sweep where the scans have it.
  */
-private fun DrawScope.drawOval(filled: Boolean) {
+private fun DrawScope.drawOval(
+    filled: Boolean,
+    stroke: CardSkinStyle.OvalStroke = CardSkinStyle.OvalStroke(),
+    suit: Color = CardInk
+) {
     withTransform({
         scale(size.width / 200f, size.height / 310f, pivot = Offset.Zero)
         rotate(-31f, pivot = Offset(100f, 155f))
@@ -438,10 +536,12 @@ private fun DrawScope.drawOval(filled: Boolean) {
         // top of it - the printed card has a hard dark edge around the white.
         if (filled) drawOval(color = Color.White, topLeft = topLeft, size = ovalSize)
         drawOval(
-            color = CardInk,
+            // A null colour means "the suit" - Noir's whole idea is that the oval is the one place
+            // the colour survives, so it must not be hard-coded to ink here.
+            color = stroke.color ?: suit,
             topLeft = topLeft,
             size = ovalSize,
-            style = Stroke(width = 12f)
+            style = Stroke(width = stroke.width)
         )
     }
 }
@@ -454,7 +554,7 @@ private fun DrawScope.drawOval(filled: Boolean) {
  * against a 156px card, and reused verbatim they would crowd a 34dp card in a fanned hand into
  * solid haze.
  */
-private fun DrawScope.drawWear() {
+private fun DrawScope.drawWear(strength: Float = 1f) {
     val diag = hypot(size.width, size.height)
     fun hatch(degrees: Float, period: Float, thickness: Float, color: Color, blend: BlendMode) {
         val rad = Math.toRadians(degrees.toDouble())
@@ -478,9 +578,9 @@ private fun DrawScope.drawWear() {
         }
     }
     val unit = size.width
-    hatch(64f, unit * 0.62f, unit * 0.006f, Color.White.copy(alpha = 0.17f), BlendMode.Screen)
-    hatch(-38f, unit * 0.85f, unit * 0.005f, Color.White.copy(alpha = 0.10f), BlendMode.Screen)
-    hatch(107f, unit * 0.57f, unit * 0.006f, Color.Black.copy(alpha = 0.12f), BlendMode.Multiply)
+    hatch(64f, unit * 0.62f, unit * 0.006f, Color.White.copy(alpha = 0.17f * strength), BlendMode.Screen)
+    hatch(-38f, unit * 0.85f, unit * 0.005f, Color.White.copy(alpha = 0.10f * strength), BlendMode.Screen)
+    hatch(107f, unit * 0.57f, unit * 0.006f, Color.Black.copy(alpha = 0.12f * strength), BlendMode.Multiply)
 }
 
 // ── Card -> art mapping ─────────────────────────────────────────────────────────────────────────

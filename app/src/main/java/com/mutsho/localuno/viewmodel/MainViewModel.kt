@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.lifecycle.AndroidViewModel
 import com.mutsho.localuno.ui.components.BoardSkin
+import com.mutsho.localuno.ui.components.CardSkin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.UUID
@@ -24,6 +25,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _boardSkin = MutableStateFlow(loadBoardSkin())
     val boardSkin: StateFlow<BoardSkin> = _boardSkin
+
+    // Local to this phone by design - everyone at the table keeps whichever skin they picked, so
+    // this is never sent over the wire and is not part of GameSettings.
+    private val _cardSkin = MutableStateFlow(loadCardSkin())
+    val cardSkin: StateFlow<CardSkin> = _cardSkin
 
     // Real, persisted counts for the Main Menu profile row (HANDOFF_MENUS.md §1.8) - the design
     // mockup hardcodes "18 games · 11 wins" as placeholder copy; showing that literally in a real
@@ -111,13 +117,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().putInt("avatar_color", color).apply()
     }
 
+    fun updateCardSkin(skin: CardSkin) {
+        _cardSkin.value = skin
+        prefs.edit().putString("card_skin", skin.storageKey).apply()
+    }
+
     fun updateBoardSkin(skin: BoardSkin) {
         _boardSkin.value = skin
         prefs.edit().putString("board_skin", skin.storageKey).apply()
     }
 
+    /**
+     * The player's name, generated once and then kept.
+     *
+     * The generated default used to be handed back without being written, so a player who never
+     * opened the name editor was renamed on every launch - Player2327 one session, Player9030 the
+     * next. On a LAN table that is worse than untidy: the other phones label seats by name, so the
+     * same person came back from a restart looking like somebody new.
+     *
+     * Written the same way as [loadPlayerId] below, which had this right all along.
+     */
     private fun loadPlayerName(): String {
-        return prefs.getString("player_name", null) ?: "Player${(1000..9999).random()}"
+        val existing = prefs.getString("player_name", null)
+        if (existing != null) return existing
+
+        val generated = "Player${(1000..9999).random()}"
+        prefs.edit().putString("player_name", generated).apply()
+        return generated
     }
 
     private fun loadPlayerId(): String {
@@ -129,8 +155,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return newId
     }
 
+    /** Same story as [loadPlayerName] - the colour is the player's, so it has to survive a restart. */
     private fun loadAvatarColor(): Int {
-        return prefs.getInt("avatar_color", (0..7).random())
+        val existing = prefs.getInt("avatar_color", -1)
+        if (existing in 0..7) return existing
+
+        val generated = (0..7).random()
+        prefs.edit().putInt("avatar_color", generated).apply()
+        return generated
+    }
+
+    private fun loadCardSkin(): CardSkin {
+        return CardSkin.fromStorageKey(prefs.getString("card_skin", null))
     }
 
     private fun loadBoardSkin(): BoardSkin {

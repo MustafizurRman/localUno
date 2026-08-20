@@ -2,6 +2,7 @@ package com.mutsho.localuno.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.animation.core.*
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import com.mutsho.localuno.R
 import com.mutsho.localuno.model.GameMode
@@ -45,8 +47,13 @@ fun JoinScreen(
     var pendingPinFor by remember { mutableStateOf<JoinLink?>(null) }
     val openScanner = rememberQrJoinScanner(
         onResult = { link ->
-            if (link.hasPin) pendingPinFor = link
-            else onManualJoin(link.host, link.port, null)
+            when {
+                // The code carries the PIN: scanning the host's screen already proved presence, so
+                // asking for the number printed beside it would be asking twice.
+                link.pin != null -> onManualJoin(link.host, link.port, link.pin)
+                link.hasPin -> pendingPinFor = link
+                else -> onManualJoin(link.host, link.port, null)
+            }
         },
         onNotOurCode = { scanError = "That QR isn't a Local UNO table." }
     )
@@ -99,6 +106,16 @@ fun JoinScreen(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            // ── Scan the host's code ────────────────────────────────────────
+            // Promoted out of the empty state. It used to appear ONLY when discovery found
+            // nothing, which is backwards: scanning is the fastest and most reliable way in, and it
+            // was hidden precisely when discovery was working - so the one path that always works
+            // was the one you could only find by failing first. The header icon stays, but a 24dp
+            // tinted glyph is not an offer anybody reads.
+            ScanQrBanner(onClick = openScanner)
+
+            Spacer(modifier = Modifier.height(14.dp))
 
             // Scanning indicator
             if (isScanning) {
@@ -427,6 +444,57 @@ private fun LobbyCard(lobby: NsdHelper.LobbyInfo, onClick: () -> Unit) {
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
+        }
+    }
+}
+
+/**
+ * The QR route, stated as an offer rather than an icon.
+ *
+ * Deliberately the loudest thing on the screen after the title: discovery over mDNS is the part
+ * that fails on a locked-down router or a guest network, and this is the path that does not care.
+ * It also joins outright now - the code carries the PIN, so there is nothing to type.
+ */
+@Composable
+private fun ScanQrBanner(onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.horizontalGradient(
+                    listOf(
+                        NocturneAccent.copy(alpha = 0.30f),
+                        NocturneAccent.copy(alpha = 0.12f)
+                    )
+                )
+            )
+            .border(1.5.dp, NocturneAccent.copy(alpha = 0.65f), RoundedCornerShape(16.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_qr_scan),
+            contentDescription = null,
+            tint = UnoYellow,
+            modifier = Modifier.size(30.dp)
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                "Scan the host's QR code",
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Fastest way in — no PIN to type, works even when the table doesn't show up below.",
+                color = Color.White.copy(alpha = 0.72f),
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+                modifier = Modifier.padding(top = 2.dp)
+            )
         }
     }
 }

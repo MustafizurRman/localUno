@@ -131,24 +131,42 @@ fun UnoBurstOverlay(name: String?) {
 fun ColorSplashOverlay(trigger: Int, color: CardColor) {
     if (trigger == 0) return
     val progress = remember(trigger) { Animatable(0f) }
+    // Ordinary state, written once when the animation lands - NOT `progress.value >= 1f` read in
+    // composition. The gate below decides whether anything is emitted at all, and driving that from
+    // a value rewritten every frame subscribes this composition to the frame clock and rebuilds the
+    // structure at the moment the animation ends. That pattern is what killed HandArc; see
+    // `finished` in HandTransferOverlay for the full account.
+    var finished by remember(trigger) { mutableStateOf(false) }
     LaunchedEffect(trigger) {
+        finished = false
         progress.snapTo(0f)
         progress.animateTo(1f, tween(700, easing = LinearEasing))
+        finished = true
     }
-    if (progress.value >= 1f) return
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Box(
-            modifier = Modifier
-                .offset(y = (-60).dp)
-                .size(60.dp)
-                .graphicsLayer {
-                    val s = 1f + progress.value * 13f
-                    scaleX = s; scaleY = s
-                    alpha = 0.95f * (1f - progress.value)
-                }
-                .clip(CircleShape)
-                .background(colorFor(color))
-        )
+    // Emission is wrapped in `if`, never skipped with an early `return`.
+    //
+    // Returning early AFTER remember/LaunchedEffect makes this composable's group structure differ
+    // between frames: on some frames it opens groups and emits, on others it bails partway. Driven
+    // by an ANIMATING value that flips many times a second, that is a structure changing under the
+    // composer on almost every frame, and the failure lands nowhere near here - it surfaces as
+    // IndexOutOfBoundsException at Stack.pop / ComposerImpl.endRoot, with no application code on
+    // the stack at all. Keeping every remember unconditional and only the CONTENT conditional is
+    // the shape Compose is built for.
+    if (!finished) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .offset(y = (-60).dp)
+                    .size(60.dp)
+                    .graphicsLayer {
+                        val s = 1f + progress.value * 13f
+                        scaleX = s; scaleY = s
+                        alpha = 0.95f * (1f - progress.value)
+                    }
+                    .clip(CircleShape)
+                    .background(colorFor(color))
+            )
+        }
     }
 }
 

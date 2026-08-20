@@ -195,6 +195,13 @@ sealed class NetworkMessage {
     /** Host -> All: the turn timer ran out and the host auto-drew for this player. */
     data class TurnTimedOut(
         val playerName: String,
+        /**
+         * Whether the clock cost them a card, or only the turn.
+         *
+         * Defaulted so a host on an older build still deserializes - it simply reports a skip,
+         * which is what every table did before [com.mutsho.localuno.model.TimeoutAction] existed.
+         */
+        val drewCard: Boolean = false,
         override val sequenceNumber: Long = 0
     ) : NetworkMessage() {
         override val type = "TURN_TIMED_OUT"

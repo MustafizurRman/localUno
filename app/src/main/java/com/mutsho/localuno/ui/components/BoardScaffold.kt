@@ -78,7 +78,22 @@ fun BoardScaffold(
     // the content and non-interactive.
     if (gameState.settings.gameMode == GameMode.NO_MERCY) {
         val heat = rememberInfiniteTransition(label = "heat")
-        val heatAlpha by heat.animateFloat(
+        // A State, deliberately NOT delegated with `by`.
+        //
+        // `val heatAlpha by ...` reads the animation during COMPOSITION, and the value then fed
+        // `.background(...)`, which is a composition-time modifier. That put the whole of
+        // BoardScaffold - top bar, felt, seats, the hand, every overlay - into a recomposition on
+        // every frame, for as long as a No Mercy round lasted. Not a slow path: a composition
+        // subscribed to the frame clock is what this app crashes on, in the Compose runtime with an
+        // empty group stack at `endRoot` and no application code on the trace.
+        //
+        // It is also why the crash looked mode-specific and unreproducible for so long. This whole
+        // block is gated on NO_MERCY, so the solo games used for soak testing - Classic deck,
+        // default rules - never ran it once, and eight clean rounds said nothing about the table
+        // people actually play on, which is No Mercy with every house rule on.
+        //
+        // Read in drawBehind instead: the pulse still animates, and nothing recomposes to do it.
+        val heatAlpha = heat.animateFloat(
             initialValue = 0.25f,
             targetValue = 0.8f,
             animationSpec = infiniteRepeatable(
@@ -91,12 +106,17 @@ fun BoardScaffold(
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(Color.Transparent, UnoRed.copy(alpha = 0.30f * heatAlpha)),
-                        radius = spread * 12f
+                .drawBehind {
+                    drawRect(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                UnoRed.copy(alpha = 0.30f * heatAlpha.value)
+                            ),
+                            radius = spread * 12f
+                        )
                     )
-                )
+                }
         )
     }
 
@@ -208,7 +228,8 @@ fun DrawPile(
     val nudge = rememberInfiniteTransition(label = "drawNudge")
     // Slow enough to read as breathing rather than blinking - it has to be noticeable without
     // becoming the thing you are trying to ignore while you think.
-    val pulse by nudge.animateFloat(
+    // State, not `by` - see `heatAlpha` above. This one is composed for the whole round too.
+    val pulse = nudge.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -234,7 +255,7 @@ fun DrawPile(
                             drawRoundRect(
                                 brush = Brush.radialGradient(
                                     colors = listOf(
-                                        UnoYellow.copy(alpha = 0.34f * (0.35f + pulse)),
+                                        UnoYellow.copy(alpha = 0.34f * (0.35f + pulse.value)),
                                         Color.Transparent
                                     ),
                                     center = Offset(size.width / 2f, size.height / 2f),
@@ -250,7 +271,7 @@ fun DrawPile(
             Box(
                 modifier = if (mustDraw) {
                     Modifier.graphicsLayer {
-                        val s = 1f + 0.05f * pulse
+                        val s = 1f + 0.05f * pulse.value
                         scaleX = s
                         scaleY = s
                     }
@@ -267,7 +288,7 @@ fun DrawPile(
                 fontSize = 9.5.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.8.sp,
-                modifier = Modifier.alpha(0.65f + 0.35f * pulse)
+                modifier = Modifier.graphicsLayer { alpha = 0.65f + 0.35f * pulse.value }
             )
         }
         Text(caption, color = Neutral500, fontSize = 9.sp)

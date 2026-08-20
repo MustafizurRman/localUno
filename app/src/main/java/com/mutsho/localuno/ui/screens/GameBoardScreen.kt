@@ -102,14 +102,16 @@ fun GameBoardScreen(
 
             // Slow conic light sweep - 9s linear, per the mockup.
             val sweep = rememberInfiniteTransition(label = "sweep")
-            val angle by sweep.animateFloat(
+            // State, not `by` - read inside the Canvas draw lambda below. Delegated, this rotated
+            // the felt by recomposing the board every frame for the entire game.
+            val angle = sweep.animateFloat(
                 initialValue = 0f,
                 targetValue = 360f,
                 animationSpec = infiniteRepeatable(tween(9000, easing = LinearEasing)),
                 label = "sweepAngle"
             )
             Canvas(modifier = Modifier.matchParentSize()) {
-                rotate(angle) {
+                rotate(angle.value) {
                     drawArc(
                         brush = Brush.sweepGradient(
                             0.00f to Color.White.copy(alpha = 0f),
@@ -147,6 +149,14 @@ fun GameBoardScreen(
                 }
             }
 
+            ActiveColourAura(
+                color = gameState.currentColor,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = maxHeight * 0.52f - 160.dp)
+                    .size(290.dp)
+            )
+
             // Centre cluster at 52% height.
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -160,7 +170,11 @@ fun GameBoardScreen(
                     // enforces the same rule, so leaving this enabled would just be a button
                     // that silently does nothing. A live draw stack is the exception: taking
                     // the penalty is a real choice even when you could stack instead.
-                    enabled = isMyTurn && (!hasPlays || gameState.pendingDrawCount > 0),
+                    // Always live on your own turn. It used to be gated on having nothing
+                // playable, which made the deck unresponsive exactly when a player was
+                // deciding whether to spend a card or take one - a choice the game
+                // should let them make. GameEngine caps it at one voluntary draw a turn.
+                enabled = isMyTurn,
                     onDraw = onDrawCard,
                     width = 66.dp,
                     height = 98.dp,
@@ -181,23 +195,13 @@ fun GameBoardScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
-                    val orb by animateColorAsState(colorFor(gameState.currentColor), tween(350), label = "orb")
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(orb)
-                            .border(2.dp, Color.White.copy(alpha = 0.3f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        // The orb is the only statement of the active colour on this skin - Side
-                        // Rails spells it out in text ("ACTIVE COLOUR - RED") right under its pips,
-                        // but here the circle is the whole message.
-                        if (showSymbols) {
-                            ColorSymbol(color = gameState.currentColor, size = 20.dp)
-                        }
-                    }
-                    Text("COLOUR", color = Neutral500, fontSize = 8.sp, letterSpacing = 1.2.sp)
+                    // Was a 40dp orb under an 8sp "COLOUR" caption. A circle states the colour
+                    // without naming it, and at 8sp the caption explaining it was unreadable in
+                    // play - so the whole thing only worked if you already knew what it meant.
+                    ActiveColourBanner(
+                        color = gameState.currentColor,
+                        showSymbols = showSymbols
+                    )
                     DirectionGlyph(gameState.direction, size = 16.dp, alpha = 0.75f)
                 }
             }

@@ -29,6 +29,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import com.mutsho.localuno.R
 import com.mutsho.localuno.ui.components.MenuCardFace
@@ -66,7 +67,6 @@ fun MainMenuScreen(
     gamesWon: Int,
     nearbyCount: Int,
     onCreateGame: () -> Unit,
-    onCustomTable: () -> Unit,
     onPlaySolo: () -> Unit,
     onJoinGame: () -> Unit,
     onInspectCards: () -> Unit,
@@ -113,7 +113,10 @@ fun MainMenuScreen(
                 // delays 0 / 1.1s / 2.2s. Modelled as one 3.4s sweep with the delay folded into a
                 // keyframe hold, since infiniteRepeatable's initialStartOffset would only delay the
                 // very first pass, not every repeat.
-                val progress by ring.animateFloat(
+        // State, not `by`. Delegating reads the animation during COMPOSITION, which puts the
+        // enclosing composable into a recomposition on every frame for as long as it is on
+        // screen - and these never stop. See BoardScaffold's `heatAlpha` for the full account.
+                val progress = ring.animateFloat(
                     initialValue = 0f,
                     targetValue = 1f,
                     animationSpec = infiniteRepeatable(
@@ -127,12 +130,16 @@ fun MainMenuScreen(
                     ),
                     label = "ringProgress$i"
                 )
-                val scale = 0.6f + (1.9f - 0.6f) * progress
-                val alpha = 0.55f * (1f - progress)
                 Box(
                     modifier = Modifier
                         .matchParentSize()
-                        .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha }
+                        .graphicsLayer {
+                            val p = progress.value
+                            val s = 0.6f + (1.9f - 0.6f) * p
+                            scaleX = s
+                            scaleY = s
+                            this.alpha = 0.55f * (1f - p)
+                        }
                         .border(width = 1.dp, color = NocturneAccent, shape = CircleShape)
                 )
             }
@@ -237,8 +244,6 @@ fun MainMenuScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 GhostLink("Play solo vs bots", onClick = onPlaySolo)
-                Text("·", color = Neutral700, fontSize = 10.5.sp)
-                GhostLink("Custom table", onClick = onCustomTable)
                 Text("·", color = Neutral700, fontSize = 10.5.sp)
                 // A test surface rather than a feature, so it sits at ghost weight alongside the
                 // other two rather than taking a slab of its own.
@@ -467,7 +472,10 @@ private fun HostCta(onClick: () -> Unit) {
         BoxWithConstraints(modifier = Modifier.matchParentSize()) {
             val band = 70.dp
             val sweep = rememberInfiniteTransition(label = "sheen")
-            val x by sweep.animateFloat(
+        // State, not `by`. Delegating reads the animation during COMPOSITION, which puts the
+        // enclosing composable into a recomposition on every frame for as long as it is on
+        // screen - and these never stop. See BoardScaffold's `heatAlpha` for the full account.
+            val x = sweep.animateFloat(
                 initialValue = -1.2f,
                 targetValue = 2.2f,
                 animationSpec = infiniteRepeatable(
@@ -486,7 +494,7 @@ private fun HostCta(onClick: () -> Unit) {
             // highlight travelling the length of the button.
             Box(
                 modifier = Modifier
-                    .offset(x = (maxWidth - band) * ((x + 1.2f) / 3.4f))
+                    .offset { IntOffset((((maxWidth - band) * ((x.value + 1.2f) / 3.4f))).roundToPx(), 0) }
                     .width(band)
                     .fillMaxHeight()
                     .background(
@@ -552,7 +560,10 @@ private fun BoxScope.DriftingCard(
 ) {
     val drift = rememberInfiniteTransition(label = "drift")
     // msDrift: 0%/100% translateY(0) rotate(r); 50% translateY(-9px) rotate(r + 1.5deg)
-    val t by drift.animateFloat(
+        // State, not `by`. Delegating reads the animation during COMPOSITION, which puts the
+        // enclosing composable into a recomposition on every frame for as long as it is on
+        // screen - and these never stop. See BoardScaffold's `heatAlpha` for the full account.
+    val t = drift.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -569,7 +580,7 @@ private fun BoxScope.DriftingCard(
     Box(
         modifier = Modifier
             .align(Alignment.TopEnd)
-            .offset(x = offsetXFromRight, y = offsetY - (9.dp * t))
+            .offset { IntOffset(offsetXFromRight.roundToPx(), (offsetY - (9.dp * t.value)).roundToPx()) }
             .then(
                 if (shadow) Modifier.shadow(
                     elevation = 14.dp,
@@ -578,7 +589,7 @@ private fun BoxScope.DriftingCard(
                     spotColor = Color.Black
                 ) else Modifier
             )
-            .graphicsLayer { rotationZ = rotationDeg + 1.5f * t; alpha = opacity }
+            .graphicsLayer { rotationZ = rotationDeg + 1.5f * t.value; alpha = opacity }
     ) {
         MenuCardFace(color = color, glyph = glyph, width = width, height = height)
     }

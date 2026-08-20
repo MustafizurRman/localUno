@@ -136,6 +136,17 @@ fun MercyBoardScreen(
                 }
             }
 
+            // Lit behind the piles, where the eye already is. This skin had no colour wash at
+            // all, and its felt is red - so on a red table, a red +4 face up and green in force,
+            // nothing on screen disagreed with "red" except a 38dp orb.
+            ActiveColourAura(
+                color = gameState.currentColor,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = maxHeight * 0.54f - 190.dp)
+                    .size(300.dp)
+            )
+
             // Centre at 54%, bottom-aligned so the tower grows upward behind the top card.
             Row(
                 verticalAlignment = Alignment.Bottom,
@@ -149,7 +160,11 @@ fun MercyBoardScreen(
                     // enforces the same rule, so leaving this enabled would just be a button
                     // that silently does nothing. A live draw stack is the exception: taking
                     // the penalty is a real choice even when you could stack instead.
-                    enabled = isMyTurn && (!hasPlays || gameState.pendingDrawCount > 0),
+                    // Always live on your own turn. It used to be gated on having nothing
+                // playable, which made the deck unresponsive exactly when a player was
+                // deciding whether to spend a card or take one - a choice the game
+                // should let them make. GameEngine caps it at one voluntary draw a turn.
+                enabled = isMyTurn,
                     onDraw = onDrawCard,
                     width = 62.dp,
                     height = 92.dp,
@@ -194,26 +209,13 @@ fun MercyBoardScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
-                    val orb by animateColorAsState(
-                        colorFor(gameState.currentColor),
-                        tween(350),
-                        label = "mercyOrb"
+                    // The banner rather than an orb, and on this skin it matters most: the felt is
+                    // red, so a red orb had to fight the table it was drawn on. Filled type in the
+                    // colour, with the colour's NAME on it, has no such problem.
+                    ActiveColourBanner(
+                        color = gameState.currentColor,
+                        showSymbols = showSymbols
                     )
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(orb)
-                            // Heavier ring than Round Table's: this felt is red, and a red orb on a
-                            // red table needs a hard edge to separate from it.
-                            .border(2.dp, Color.White.copy(alpha = 0.55f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (showSymbols) {
-                            ColorSymbol(color = gameState.currentColor, size = 19.dp)
-                        }
-                    }
-                    Text("COLOUR", color = Neutral400, fontSize = 8.sp, letterSpacing = 1.2.sp)
                     DirectionGlyph(gameState.direction, size = 15.dp, alpha = 0.8f)
                 }
             }

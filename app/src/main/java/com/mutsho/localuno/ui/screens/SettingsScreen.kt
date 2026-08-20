@@ -25,6 +25,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mutsho.localuno.R
 import com.mutsho.localuno.ui.components.BoardSkin
+import com.mutsho.localuno.ui.components.CardSkin
+import com.mutsho.localuno.ui.components.LocalCardSkin
+import com.mutsho.localuno.ui.components.UnoCardFace
+import com.mutsho.localuno.model.Card
+import com.mutsho.localuno.model.CardColor
+import com.mutsho.localuno.model.CardType
+import androidx.compose.runtime.CompositionLocalProvider
 import com.mutsho.localuno.ui.theme.*
 
 /**
@@ -47,6 +54,8 @@ fun SettingsScreen(
     onAvatarColorChange: (Int) -> Unit,
     boardSkin: BoardSkin,
     onBoardSkinChange: (BoardSkin) -> Unit,
+    cardSkin: CardSkin,
+    onCardSkinChange: (CardSkin) -> Unit,
     showCardSymbols: Boolean,
     onToggleCardSymbols: () -> Unit,
     hapticsEnabled: Boolean,
@@ -152,6 +161,30 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(20.dp))
 
             // ── Board ───────────────────────────────────────────────────────
+            // ── CARDS ───────────────────────────────────────────────────
+            // From CardSkins.dc.html. It lives in Settings rather than on the board for the same
+            // reason the board skin does - restyling mid-round is a source of bugs, not a feature -
+            // and the design already frames it as a per-device choice.
+            SectionLabel("CARDS", "how your own cards look — nobody else sees this")
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                CardSkin.entries.forEach { skin ->
+                    CardSkinRow(
+                        skin = skin,
+                        selected = skin == cardSkin,
+                        onPick = { onCardSkinChange(skin) }
+                    )
+                }
+            }
+            Text(
+                "Skins are local to your phone — everyone at the table keeps whichever skin they " +
+                    "picked. Bold is the safest choice if red and green are hard to tell apart.",
+                color = Neutral600,
+                fontSize = 10.5.sp,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
             SectionLabel("BOARD", "how the table looks while you play")
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 BoardSkin.entries.forEach { skin ->
@@ -218,6 +251,66 @@ private fun SectionLabel(title: String, subtitle: String) {
     Column(modifier = Modifier.padding(bottom = 10.dp)) {
         Text(title, color = Accent300, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.8.sp)
         Text(subtitle, color = Neutral600, fontSize = 10.5.sp)
+    }
+}
+
+/**
+ * One skin, previewed with an actual card.
+ *
+ * The preview is [UnoCardFace] itself with [LocalCardSkin] overridden, not a picture of a card. A
+ * swatch would have to be maintained in parallel with the skin and would drift the first time a
+ * skin changed; this cannot, because it IS the card.
+ */
+@Composable
+private fun CardSkinRow(skin: CardSkin, selected: Boolean, onPick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+                if (selected) NocturneAccent.copy(alpha = 0.13f)
+                else Color.White.copy(alpha = 0.04f)
+            )
+            .border(
+                width = 1.dp,
+                color = if (selected) Accent700 else Neutral800,
+                shape = RoundedCornerShape(14.dp)
+            )
+            .clickable { onPick() }
+            .padding(10.dp)
+    ) {
+        CompositionLocalProvider(LocalCardSkin provides skin) {
+            UnoCardFace(
+                card = Card(id = -1, color = CardColor.RED, type = CardType.SEVEN),
+                width = 42.dp,
+                height = 65.dp
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                skin.displayName,
+                color = if (selected) Accent200 else NocturneText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                skin.description,
+                color = Neutral500,
+                fontSize = 10.sp,
+                lineHeight = 14.sp,
+                modifier = Modifier.padding(top = 1.dp)
+            )
+        }
+        if (selected) {
+            Icon(
+                painter = painterResource(R.drawable.ic_check),
+                contentDescription = "Selected",
+                tint = NocturneAccent,
+                modifier = Modifier.size(17.dp)
+            )
+        }
     }
 }
 

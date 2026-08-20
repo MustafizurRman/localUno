@@ -77,6 +77,7 @@ class NegativeModifierTest {
         assertTrue(!hasNegative("Modifier.size(cardW, cardH)", "size"))
     }
 
+
     // ── scanner ─────────────────────────────────────────────────────────────
 
     private val negative = Regex("""-\s*\d""")

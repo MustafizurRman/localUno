@@ -81,7 +81,9 @@ fun LobbyScreen(
                                 host = ip,
                                 port = port,
                                 lobbyName = settings.lobbyName,
-                                hasPin = settings.pin != null
+                                hasPin = settings.pin != null,
+                                // The scan is the proof of presence - see JoinLink.
+                                pin = settings.pin
                             ).encode(),
                             size = 240.dp
                         )

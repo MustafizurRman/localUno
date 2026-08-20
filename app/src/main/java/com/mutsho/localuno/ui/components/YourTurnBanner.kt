@@ -58,59 +58,75 @@ fun YourTurnBanner(trigger: Int, modifier: Modifier = Modifier) {
     var lastPlayed by remember { mutableStateOf(0) }
     val progress = remember { Animatable(1f) }
 
+    // Ordinary state written once at the end, rather than gating the emission below on
+    // `progress.value >= 1f`. See `finished` in HandTransferOverlay: deciding STRUCTURE from a
+    // value the animation rewrites every frame is what tears the subtree out mid-flight.
+    var finished by remember { mutableStateOf(true) }
     LaunchedEffect(trigger) {
         if (trigger == 0 || trigger == lastPlayed) return@LaunchedEffect
         lastPlayed = trigger
+        finished = false
         progress.snapTo(0f)
         progress.animateTo(1f, tween(TOTAL_MS, easing = LinearEasing))
+        finished = true
     }
 
     val t = progress.value
-    if (t >= 1f) return
+    // Emission is wrapped in `if`, never skipped with an early `return`.
+    //
+    // Returning early AFTER remember/LaunchedEffect makes this composable's group structure differ
+    // between frames: on some frames it opens groups and emits, on others it bails partway. Driven
+    // by an ANIMATING value that flips many times a second, that is a structure changing under the
+    // composer on almost every frame, and the failure lands nowhere near here - it surfaces as
+    // IndexOutOfBoundsException at Stack.pop / ComposerImpl.endRoot, with no application code on
+    // the stack at all. Keeping every remember unconditional and only the CONTENT conditional is
+    // the shape Compose is built for.
+    if (!finished) {
 
-    // In fast, hold, out gently - the hold is what makes it readable rather than a flicker.
-    val alpha = when {
-        t < 0.12f -> t / 0.12f
-        t > 0.72f -> (1f - t) / 0.28f
-        else -> 1f
-    }
-    // A single overshoot on entry, settling to rest. Reads as a stamp landing.
-    val scale = when {
-        t < 0.12f -> 0.72f + 0.42f * (t / 0.12f)
-        t < 0.26f -> 1.14f - 0.14f * ((t - 0.12f) / 0.14f)
-        else -> 1f
-    }
+        // In fast, hold, out gently - the hold is what makes it readable rather than a flicker.
+        val alpha = when {
+            t < 0.12f -> t / 0.12f
+            t > 0.72f -> (1f - t) / 0.28f
+            else -> 1f
+        }
+        // A single overshoot on entry, settling to rest. Reads as a stamp landing.
+        val scale = when {
+            t < 0.12f -> 0.72f + 0.42f * (t / 0.12f)
+            t < 0.26f -> 1.14f - 0.14f * ((t - 0.12f) / 0.14f)
+            else -> 1f
+        }
 
-    // Positioned by the CALLER, which is the only place that knows the board's layout. Sizing
-    // itself here was the bug: a fillMaxWidth Box wraps its own height, so it sat at the parent's
-    // top edge and the "above centre" offset put the banner on top of an opponent's avatar.
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-            modifier = Modifier
-                .graphicsLayer {
-                    this.alpha = alpha
-                    scaleX = scale
-                    scaleY = scale
-                }
-                .clip(RoundedCornerShape(16.dp))
-                .background(Neutral900.copy(alpha = 0.94f))
-                .border(2.dp, UnoYellow, RoundedCornerShape(16.dp))
-                .padding(horizontal = 26.dp, vertical = 12.dp)
-        ) {
-            Text(
-                text = "YOUR TURN",
-                color = UnoYellow,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 3.sp
-            )
-            Text(
-                text = "spin the dial · tap the top card",
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 11.sp
-            )
+        // Positioned by the CALLER, which is the only place that knows the board's layout. Sizing
+        // itself here was the bug: a fillMaxWidth Box wraps its own height, so it sat at the parent's
+        // top edge and the "above centre" offset put the banner on top of an opponent's avatar.
+        Box(modifier = modifier, contentAlignment = Alignment.Center) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier
+                    .graphicsLayer {
+                        this.alpha = alpha
+                        scaleX = scale
+                        scaleY = scale
+                    }
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Neutral900.copy(alpha = 0.94f))
+                    .border(2.dp, UnoYellow, RoundedCornerShape(16.dp))
+                    .padding(horizontal = 26.dp, vertical = 12.dp)
+            ) {
+                Text(
+                    text = "YOUR TURN",
+                    color = UnoYellow,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 3.sp
+                )
+                Text(
+                    text = "spin the dial · tap the top card",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 11.sp
+                )
+            }
         }
     }
 }

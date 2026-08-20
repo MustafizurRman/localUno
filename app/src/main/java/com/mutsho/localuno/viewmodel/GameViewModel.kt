@@ -52,6 +52,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         private const val BOT_THINK_CLOCK_FRACTION = 0.6
     }
 
+    /**
+     * Set when a reconnect actually succeeded, so the next state diff is skipped once.
+     *
+     * Replaces a heuristic that could not work: the old code inferred "I missed broadcasts" from
+     * the sequence number jumping by more than one. But the sequence counts ENGINE STATE
+     * TRANSITIONS, not broadcasts, and a single card play routinely produces two or three of them -
+     * the play, the card's effect, the mercy check. Every ordinary play therefore looked like a
+     * gap, so the move log filled with "Reconnected - catching up" INSTEAD of the moves, in games
+     * with no network at all. Only the code that performs a reconnect knows one happened.
+     */
+    @Volatile private var justReconnected = false
+
     private var gameEngine: GameEngine? = null
     private var gameServer: GameServer? = null
     private var gameClient: GameClient? = null
@@ -101,8 +113,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val _knockoutEvent = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val knockoutEvent: SharedFlow<String> = _knockoutEvent
 
-    private val _timeoutEvent = MutableSharedFlow<String>(extraBufferCapacity = 1)
-    val timeoutEvent: SharedFlow<String> = _timeoutEvent
+    /** Who ran out of time, and whether it cost them a card. */
+    private val _timeoutEvent = MutableSharedFlow<Pair<String, Boolean>>(extraBufferCapacity = 1)
+    val timeoutEvent: SharedFlow<Pair<String, Boolean>> = _timeoutEvent
 
     // Fires when a play is silently rejected because the turn already moved on (e.g. the turn
     // timer auto-drew for this player while they were still choosing a wild card's color) -
@@ -360,6 +373,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             _reconnecting.value = false
             val client = recovered
             if (client != null) {
+                justReconnected = true
                 attachClientMessages(client)
             } else {
                 notifyGameEnded("Connection to the host was lost")
@@ -834,23 +848,23 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private fun applyMoveLog(prevState: GameState, newState: GameState) {
         if (newState.sequenceNumber == prevState.sequenceNumber) return
 
-        // The diff below assumes prevState and newState are CONSECUTIVE - "actor" is read as
-        // whoever prevState says is current, which is only the actual player who just moved if
-        // exactly one action happened between the two states. Two situations break that: the very
-        // first StateUpdate this device ever receives (prevState is still initializeAsClient's
-        // blank default, topCard null) and a reconnect that skipped some number of broadcasts
-        // entirely (sequenceNumber jumps by more than the usual single step - see
-        // GameViewModel.handleClientDisconnected). Across either gap the diff would misattribute a
-        // play to whichever player the STALE state happened to have as current, not whoever
-        // actually made it - worse than showing nothing.
-        val isGap = prevState.topCard == null || newState.sequenceNumber - prevState.sequenceNumber > 1
-        if (isGap) {
-            // Only the reconnect case is worth a log line - a fresh join isn't "catching up" on
-            // anything, there's no history before it to have missed.
-            if (prevState.topCard != null) {
-                _moveLog.value = (listOf(MoveLogEntry("Reconnected — catching up", MoveLogTint.NEUTRAL))
-                        + _moveLog.value).take(MOVE_LOG_LIMIT)
-            }
+        // The diff assumes prevState and newState are CONSECUTIVE - "actor" is read as whoever
+        // prevState says is current, which only identifies the real player if exactly one action
+        // happened between them. Two situations break that, and they are detected differently.
+        //
+        // A fresh join: prevState is still the blank default, so there is no history to diff and
+        // nothing worth logging - a device that just arrived has not "missed" anything.
+        if (prevState.topCard == null) return
+
+        // A reconnect that skipped broadcasts: flagged explicitly by the code that reconnected,
+        // NOT inferred from the sequence number. Sequence counts engine state transitions rather
+        // than broadcasts, and one play routinely produces two or three, so "jumped by more than
+        // one" matched every ordinary play - which is why this line used to appear on a solo table
+        // with no network anywhere near it, crowding out the moves it was meant to sit beside.
+        if (justReconnected) {
+            justReconnected = false
+            _moveLog.value = (listOf(MoveLogEntry("Reconnected — catching up", MoveLogTint.NEUTRAL))
+                    + _moveLog.value).take(MOVE_LOG_LIMIT)
             return
         }
 
@@ -922,13 +936,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             val resolved = if (phase == GamePhase.CHOOSING_SWAP) {
                 engine.autoResolveSwap()
             } else {
-                engine.drawCardForPlayer(playerId)
+                // NOT drawCardForPlayer: it declines to draw for anyone holding a playable card,
+                // so the commonest timeout of all - a player with a good hand who stepped away -
+                // came back unchanged and the table stopped dead. applyTurnTimeout always advances.
+                engine.applyTurnTimeout(playerId)
             }
             // Notify + broadcast BEFORE applyHostState: it calls restartTurnTimer again, which
             // cancels turnTimerJob - since that's this very coroutine before reassignment, anything
             // placed after it risks running on an already-cancelled job.
-            _timeoutEvent.emit(playerName)
-            gameServer?.broadcastToAll(NetworkMessage.TurnTimedOut(playerName))
+            // What the clock actually did, read off the result rather than re-derived from the
+            // rule. The banner used to claim a draw unconditionally, which is wrong on every table
+            // running the default Skip; asking the resolved state cannot drift from the engine the
+            // way a second copy of the rule would.
+            val before = current.getPlayerById(playerId)?.cardCount ?: 0
+            val drew = (resolved.getPlayerById(playerId)?.cardCount ?: before) > before
+            _timeoutEvent.emit(playerName to drew)
+            gameServer?.broadcastToAll(NetworkMessage.TurnTimedOut(playerName, drew))
             applyHostState(resolved, resetTurnTimer = true)
         }
     }
@@ -1003,7 +1026,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _durationSeconds.value = message.durationSeconds
             }
             is NetworkMessage.TurnTimedOut -> {
-                viewModelScope.launch { _timeoutEvent.emit(message.playerName) }
+                viewModelScope.launch { _timeoutEvent.emit(message.playerName to message.drewCard) }
             }
             is NetworkMessage.PlayRejected -> {
                 viewModelScope.launch { _playRejectedEvent.emit(message.reason) }

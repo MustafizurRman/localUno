@@ -26,12 +26,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -265,7 +268,35 @@ fun HandArc(
         var velocity by remember { mutableFloatStateOf(0f) }
         var dragging by remember { mutableStateOf(false) }
 
-        val selected = DialMath.nearest(n, theta)
+        /**
+         * Which card is under the needle - published BY the physics loop, never derived from
+         * [theta] here.
+         *
+         * This is the difference between a dial that spins and an app that dies. `theta` is
+         * rewritten on every frame; anything composed that reads it makes the composition itself
+         * run at frame rate, and a soak on the emulator killed the app inside two rounds every
+         * time that was true. It died in the Compose runtime with an empty group stack at
+         * `endRoot` and not one line of application code on the trace, which is why six earlier
+         * readings of the stack led nowhere - the report names the frame that tripped, not the one
+         * that broke the ground.
+         *
+         * Two shapes were tried and both crashed: reading `theta` straight into the composition,
+         * then hiding it behind `derivedStateOf`. `derivedStateOf` only narrows how OFTEN the
+         * composition is invalidated - the composition is still a subscriber to a value being
+         * written from a frame callback, and that is the part that does not survive.
+         *
+         * So the loop pushes the answer out instead, and writes only when the needle card actually
+         * changes - a couple of times a second, from ordinary state. Composition never reads
+         * `theta` at all now; only `offset {}` and `graphicsLayer {}` do, and those are layout and
+         * draw, which are exactly where a 60fps value belongs.
+         */
+        val selectedState = remember(n) {
+            // withoutReadObservation: this initialiser runs DURING composition, so an ordinary
+            // read of `theta` here would re-subscribe the composition to the very thing being
+            // severed - and would do it invisibly, at the one moment it looks harmless.
+            mutableIntStateOf(Snapshot.withoutReadObservation { DialMath.nearest(n, theta) })
+        }
+        val selected = selectedState.intValue
 
         // Collision-proof composition keys; see occurrenceIndices.
         val keySuffix = remember(hand) { occurrenceIndices(hand.map { it.id }) }
@@ -274,7 +305,16 @@ fun HandArc(
         LaunchedEffect(n) {
             while (true) {
                 withFrameNanos { }
-                if (n == 0 || dragging) continue
+                if (n == 0) continue
+
+                // Publish the needle card. Before the dragging check, so a drag moves the
+                // selection as the player's thumb moves rather than snapping when they let go.
+                val nearest = DialMath.nearest(n, theta)
+                if (nearest >= 0 && nearest != selectedState.intValue) {
+                    selectedState.intValue = nearest
+                }
+
+                if (dragging) continue
                 if (abs(velocity) > 0.04f) {
                     theta = DialMath.normalise(theta + velocity, n)
                     velocity *= DialMath.FRICTION
@@ -341,7 +381,10 @@ fun HandArc(
 
             // ── The glow under the needle ───────────────────────────────────
             val pulse = rememberInfiniteTransition(label = "dialGlow")
-            val glowAlpha by pulse.animateFloat(
+            // State, not `by`. This scope composes the entire dial, including the keyed card
+            // list, so delegating here recomposed the whole hand every frame for the whole
+            // game - the same shape as the theta read that crashed this file before.
+            val glowAlpha = pulse.animateFloat(
                 initialValue = 0.45f,
                 targetValue = 0.85f,
                 animationSpec = infiniteRepeatable(
@@ -355,7 +398,7 @@ fun HandArc(
                     .align(Alignment.BottomCenter)
                     .offset(y = -d(DESIGN_GLOW_BOTTOM))
                     .size(width = d(186f), height = d(104f))
-                    .graphicsLayer { alpha = glowAlpha }
+                    .graphicsLayer { alpha = glowAlpha.value }
                     .drawBehind {
                         // radial-gradient(64% 100% at 50% 100%, accent 38%, transparent 74%)
                         drawRect(
@@ -374,45 +417,59 @@ fun HandArc(
 
             // ── The cards ───────────────────────────────────────────────────
             hand.forEachIndexed { i, card ->
-                val a = DialMath.angleOf(i, n, theta)
-                val dist = abs(a)
-                // Faded out well before the wrap seam, so the discontinuity is never seen.
-                val opacity = when {
-                    dist > 34f -> 0f
-                    dist > 24f -> (34f - dist) / 10f
-                    else -> 1f
-                }
-                if (opacity <= 0.01f) return@forEachIndexed
-
+                // EVERY card is composed, every frame, including the ones currently invisible
+                // behind the wrap seam.
+                //
+                // This used to `return@forEachIndexed` when a card faded out, which meant the set
+                // of composed children changed as cards rotated through the fade window - a
+                // structural edit to the composition on almost every frame, driven by an animation.
+                // Composing a constant set and hiding the far ones with alpha costs nothing after
+                // the first pass (UnoCardFace is skippable, and alpha 0 skips drawing), and it
+                // makes the hand's composition completely stable while the dial spins.
                 val onNeedle = i == selected
-                val rim = radiusPx + if (onNeedle) with(density) { d(DESIGN_LIFT).toPx() } else 0f
-                val rad = a * PI.toFloat() / 180f
-                // The card hangs off the axle by its BOTTOM CENTRE - that is the .ha-card
-                // transform-origin, and it is what makes the card lean with the arc rather than
-                // stay upright while sliding along it.
-                val bottomX = centreX + rim * sin(rad)
-                val bottomY = pivotY - rim * cos(rad)
                 val cardWpx = with(density) { cardW.toPx() }
                 val cardHpx = with(density) { cardH.toPx() }
+                val liftPx = with(density) { d(DESIGN_LIFT).toPx() }
+
+                // Position, rotation and fade are all read inside the layout/draw lambdas below,
+                // so `theta` never touches the composition phase.
+                fun angleNow() = DialMath.angleOf(i, n, theta)
+                fun opacityNow(): Float {
+                    val dist = abs(angleNow())
+                    return when {
+                        dist > 34f -> 0f
+                        dist > 24f -> (34f - dist) / 10f
+                        else -> 1f
+                    }
+                }
 
                 key(card.id, keySuffix.getOrElse(i) { 0 }) {
                     Box(
                         modifier = Modifier
                             .offset {
+                                // Layout phase: no recomposition when this changes.
+                                val rim = radiusPx + if (onNeedle) liftPx else 0f
+                                val rad = angleNow() * PI.toFloat() / 180f
                                 IntOffset(
-                                    (bottomX - cardWpx / 2f).roundToInt(),
-                                    (bottomY - cardHpx).roundToInt()
+                                    (centreX + rim * sin(rad) - cardWpx / 2f).roundToInt(),
+                                    (pivotY - rim * cos(rad) - cardHpx).roundToInt()
                                 )
                             }
-                            .zIndex(if (onNeedle) 60f else (40f - dist).coerceAtLeast(1f))
+                            // Derived from `selected` rather than from the live angle, so it is
+                            // stable between selection changes instead of shifting every frame.
+                            .zIndex(
+                                if (onNeedle) 60f
+                                else (40f - abs(i - selected)).coerceAtLeast(1f)
+                            )
                             .size(cardW, cardH)
                             .graphicsLayer {
+                                // Draw phase: also free of recomposition.
                                 transformOrigin = TransformOrigin(0.5f, 1f)
-                                rotationZ = a
+                                rotationZ = angleNow()
                                 val s = if (onNeedle) DESIGN_SEL_SCALE else 1f
                                 scaleX = s
                                 scaleY = s
-                                alpha = opacity
+                                alpha = opacityNow()
                             }
                             .shadow(
                                 elevation = if (onNeedle) 16.dp else 8.dp,
@@ -444,6 +501,13 @@ fun HandArc(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
                             ) {
+                                // A card faded out behind the wrap seam is still COMPOSED now (see
+                                // the loop's own note), so it is still hit-testable - it just is
+                                // not visible. Tapping empty felt and having an invisible card
+                                // answer would be worse than the recomposition churn that skipping
+                                // them used to cause, so visibility is checked here instead.
+                                if (opacityNow() <= 0.01f) return@clickable
+
                                 // Compose cancels a click once the pointer passes touch slop, so a
                                 // spin that starts on a card never also plays it - the source had
                                 // to track this by hand (`wasDrag`) because it read raw events.
@@ -460,11 +524,20 @@ fun HandArc(
                             card = card,
                             rules = rules,
                             showSymbols = showSymbols,
-                            // Only the needle card is dimmed-or-not on playability. The rest are
-                            // shown plain: at 78dp a dial card is read whole, and scrimming most
-                            // of the arc dark just to say "not this one" makes the hand unreadable
-                            // for information the needle already carries.
-                            dimmed = onNeedle && !selectedPlayable,
+                            // The needle card is NEVER dimmed, and the unplayable ones behind it
+                            // are.
+                            //
+                            // This used to be exactly inverted - `onNeedle && !selectedPlayable` -
+                            // so the only card that could ever look dead was the one under the
+                            // needle, lifted, ringed and scaled up as the card you are looking at.
+                            // The card you were being invited to play was the gloomy one and its
+                            // unplayable neighbours were bright, which reads as the dial telling
+                            // you the opposite of what it means.
+                            //
+                            // Gated on isMyTurn: when the turn is somebody else's nothing is
+                            // playable, and dimming the entire hand would say "you hold nothing"
+                            // rather than "not yet".
+                            dimmed = isMyTurn && !onNeedle && card.id !in playableCardIds,
                             width = cardW,
                             height = cardH,
                             // The dial shows cards at full size with only their edges overlapped,

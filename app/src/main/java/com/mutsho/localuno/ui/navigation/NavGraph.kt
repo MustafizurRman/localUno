@@ -9,6 +9,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.mutsho.localuno.model.GameSettings
+import com.mutsho.localuno.ui.components.LocalCardSkin
 import com.mutsho.localuno.ui.screens.*
 import kotlinx.coroutines.delay
 import com.mutsho.localuno.viewmodel.GameViewModel
@@ -17,8 +18,6 @@ import com.mutsho.localuno.viewmodel.MainViewModel
 
 object Routes {
     const val MAIN_MENU = "main_menu"
-    const val MODE_SELECT = "mode_select"
-    const val SOLO_SETUP = "solo_setup"
     const val CUSTOM_TABLE = "custom_table"
     const val LOBBY = "lobby"
     const val JOIN = "join"
@@ -35,6 +34,12 @@ fun AppNavigation() {
     val lobbyViewModel: LobbyViewModel = viewModel()
     val gameViewModel: GameViewModel = viewModel()
 
+    // Provided once for the whole app rather than passed down. Card faces are drawn from the hand
+    // dial, the discard pile, the seat rails, the card gallery and the settings preview, and none
+    // of those wants a skin parameter it does nothing with but forward.
+    val cardSkin by mainViewModel.cardSkin.collectAsState()
+
+    CompositionLocalProvider(LocalCardSkin provides cardSkin) {
     NavHost(navController = navController, startDestination = Routes.MAIN_MENU) {
         composable(Routes.MAIN_MENU) {
             val playerName by mainViewModel.playerName.collectAsState()
@@ -59,9 +64,13 @@ fun AppNavigation() {
                 gamesPlayed = gamesPlayed,
                 gamesWon = gamesWon,
                 nearbyCount = lobbies.size,
-                onCreateGame = { navController.navigate(Routes.MODE_SELECT) },
-                onCustomTable = { navController.navigate(Routes.CUSTOM_TABLE) },
-                onPlaySolo = { navController.navigate(Routes.SOLO_SETUP) },
+                // One entry point. HOST A TABLE and the old "Custom table" link went to two
+                // different screens that did the same job - both picked a deck, seats and rules,
+                // both emitted a GameSettings, both landed in the same lobby. The deck choice is a
+                // chip on the host screen now, so there is one way to open a table.
+                onCreateGame = { navController.navigate(Routes.CUSTOM_TABLE) },
+                // Same screen as hosting: solo is the same table with nobody invited.
+                onPlaySolo = { navController.navigate(Routes.CUSTOM_TABLE) },
                 onJoinGame = { navController.navigate(Routes.JOIN) },
                 onInspectCards = { navController.navigate(Routes.CARD_GALLERY) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) }
@@ -90,6 +99,8 @@ fun AppNavigation() {
                 onAvatarColorChange = { mainViewModel.updateAvatarColor(it) },
                 boardSkin = boardSkin,
                 onBoardSkinChange = { mainViewModel.updateBoardSkin(it) },
+                cardSkin = cardSkin,
+                onCardSkinChange = { mainViewModel.updateCardSkin(it) },
                 showCardSymbols = showCardSymbols,
                 onToggleCardSymbols = { mainViewModel.toggleCardSymbols() },
                 hapticsEnabled = hapticsEnabled,
@@ -102,36 +113,18 @@ fun AppNavigation() {
             )
         }
 
-        composable(Routes.MODE_SELECT) {
-            ModeSelectScreen(
-                onBack = { navController.popBackStack() },
-                onCreateLobby = { settings ->
-                    val playerId = mainViewModel.playerId.value
-                    val playerName = mainViewModel.playerName.value
-                    val avatarColor = mainViewModel.avatarColor.value
-                    lobbyViewModel.leaveLobby()   // destroy any previous lobby first
-                    // Name the table after its host. The design dropped the name field, and a
-                    // deck-derived name ("No Mercy table") is identical for every host running
-                    // that deck - which collides on the wire, because NsdHelper registers the
-                    // service as "LocalUno-<lobbyName>" and Android silently renames duplicates.
-                    // It also left the Join list showing several indistinguishable rows.
-                    val named = settings.copy(
-                        lobbyName = settings.lobbyName.ifBlank { "$playerName's table" }
-                    )
-                    lobbyViewModel.createLobby(named, playerId, playerName, avatarColor)
-                    navController.navigate(Routes.LOBBY)
-                }
-            )
-        }
 
         // Solo: the same settings screen in solo dress, then straight onto the board. No lobby step
         // - there is nobody to wait for, and no server is started, so a lobby would only be a
         // screen showing a table that is already complete.
-        composable(Routes.SOLO_SETUP) {
-            ModeSelectScreen(
+
+        composable(Routes.CUSTOM_TABLE) {
+            val savedPreset by mainViewModel.rulePreset.collectAsState()
+            CustomTableScreen(
+                savedPresetKey = savedPreset,
+                onPresetSaved = { mainViewModel.setRulePreset(it) },
                 onBack = { navController.popBackStack() },
-                solo = true,
-                onCreateLobby = { settings ->
+                onPlaySolo = { settings ->
                     lobbyViewModel.startSolo(
                         settings = settings.copy(lobbyName = "Solo table"),
                         playerId = mainViewModel.playerId.value,
@@ -146,22 +139,15 @@ fun AppNavigation() {
                         server = null
                     )
                     navController.navigate(Routes.GAME) { popUpTo(Routes.MAIN_MENU) }
-                }
-            )
-        }
-
-        composable(Routes.CUSTOM_TABLE) {
-            val savedPreset by mainViewModel.rulePreset.collectAsState()
-            CustomTableScreen(
-                savedPresetKey = savedPreset,
-                onPresetSaved = { mainViewModel.setRulePreset(it) },
-                onBack = { navController.popBackStack() },
+                },
                 onOpenTable = { settings ->
                     val playerId = mainViewModel.playerId.value
                     val playerName = mainViewModel.playerName.value
                     val avatarColor = mainViewModel.avatarColor.value
                     lobbyViewModel.leaveLobby()
-                    // Same host-derived naming as the quick path - see the MODE_SELECT route.
+                    // Named after the host: a deck-derived name ("No Mercy table") is identical
+                    // for every host running that deck, which collides on the wire - NsdHelper
+                    // registers as "LocalUno-<lobbyName>" and Android silently renames duplicates.
                     val named = settings.copy(
                         lobbyName = settings.lobbyName.ifBlank { "$playerName's table" }
                     )
@@ -324,8 +310,12 @@ fun AppNavigation() {
             // second overlay/param threaded through all 3 board skins.
             var timeoutAnnouncement by remember { mutableStateOf<String?>(null) }
             LaunchedEffect(Unit) {
-                gameViewModel.timeoutEvent.collect { name ->
-                    timeoutAnnouncement = "$name ran out of time and drew a card"
+                gameViewModel.timeoutEvent.collect { (name, drew) ->
+                    // Says what happened. It used to claim a draw unconditionally, which was wrong
+                    // on every table running the default Skip rule.
+                    timeoutAnnouncement =
+                        if (drew) "Time's up — $name drew a card"
+                        else "Time's up — $name's turn was skipped"
                     delay(2500)
                     timeoutAnnouncement = null
                 }
@@ -548,4 +538,5 @@ fun AppNavigation() {
             )
         }
     }
+}
 }

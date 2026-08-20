@@ -11,7 +11,20 @@ import java.net.URLEncoder
  * PIN flag as a rejected join), and hand-rolled parsing can be unit-tested on the JVM while
  * `Uri` cannot.
  *
- * Shape: `localuno://join?h=<ipv4>&p=<port>&n=<url-encoded name>&pin=<0|1>`
+ * Shape: `localuno://join?h=<ipv4>&p=<port>&n=<url-encoded name>&pin=<0|1>&k=<url-encoded pin>`
+ *
+ * ## Why the PIN itself travels in the code
+ *
+ * `pin=<0|1>` says only THAT a table is locked. Carrying the flag alone meant scanning the host's
+ * screen and then being asked to type the number printed next to it - the scan proved you were
+ * standing in front of the host, and the app then asked you to prove it again, worse.
+ *
+ * The PIN exists to stop somebody else on the same Wi-Fi wandering into the table. A QR displayed
+ * on the host's phone is a stronger claim than a four-digit number: you have to be in the room and
+ * pointed at their screen. So `k` carries the real PIN and a scan joins outright.
+ *
+ * `pin` is still emitted for hosts and guests on older builds, which only know that key - they keep
+ * the old typed-PIN behaviour rather than failing.
  *
  * Unknown query keys are ignored and missing optional ones fall back, so a QR produced by a later
  * build that carries extra fields still parses here instead of failing shut - the two phones at a
@@ -21,11 +34,14 @@ data class JoinLink(
     val host: String,
     val port: Int,
     val lobbyName: String,
-    val hasPin: Boolean
+    val hasPin: Boolean,
+    /** The actual PIN, when the code carries one. Null means "locked, but you'll have to ask". */
+    val pin: String? = null
 ) {
     fun encode(): String {
         val n = URLEncoder.encode(lobbyName, Charsets.UTF_8.name())
-        return "$SCHEME://$AUTHORITY?h=$host&p=$port&n=$n&pin=${if (hasPin) 1 else 0}"
+        val k = pin?.let { "&k=" + URLEncoder.encode(it, Charsets.UTF_8.name()) }.orEmpty()
+        return "$SCHEME://$AUTHORITY?h=$host&p=$port&n=$n&pin=${if (hasPin) 1 else 0}$k"
     }
 
     companion object {
@@ -57,11 +73,14 @@ data class JoinLink(
             // A port outside the ephemeral/user range is not something we ever emit, and connecting
             // to a privileged port on a stranger's say-so is not a thing to do quietly.
             val port = params["p"]?.toIntOrNull()?.takeIf { it in 1..65535 } ?: return null
+            val carried = params["k"]?.takeIf { it.isNotBlank() }
             return JoinLink(
                 host = host,
                 port = port,
                 lobbyName = params["n"].orEmpty(),
-                hasPin = params["pin"] == "1"
+                // A code carrying a PIN is a locked table whether or not the older flag says so.
+                hasPin = params["pin"] == "1" || carried != null,
+                pin = carried
             )
         }
     }

@@ -205,13 +205,19 @@ class CardEffectTest {
     }
 
     /**
-     * Drawing is only legal when you have nothing you can play. Without that guard the Classic
-     * branch of drawCardForPlayer leaked a fishing exploit: drawing a PLAYABLE card keeps the turn,
-     * and nothing stopped a second draw, so a player could pull card after card on a single turn,
-     * holding the turn whenever the card happened to be playable and stopping whenever they liked.
+     * You may always choose to draw, even holding something playable - but only once a turn.
+     *
+     * The draw used to be refused outright while any legal card was in hand, on the reading that the
+     * rule is "if you don't have a matching card, you must draw". That is a rule about when you MUST
+     * draw, not when you MAY, and it took away a real decision: holding a green +2 and a green 5 and
+     * wanting to spend neither is an ordinary thing to want, and the board just ignored the tap.
+     *
+     * The refusal was closing something real, though, and this checks the replacement still closes
+     * it. A drawn PLAYABLE card keeps the turn, so unlimited draws let a player fish the whole deck
+     * on one turn and stop whenever it suited them. One voluntary draw per turn is the cap.
      */
     @Test
-    fun `drawing is refused while a playable card is in hand`() {
+    fun `a player may draw once even with a playable card, but not twice`() {
         val engine = GameEngine(GameSettings(gameMode = GameMode.CLASSIC, turnTimeoutSeconds = null))
         engine.initializeGame(seats(3))
 
@@ -226,13 +232,20 @@ class CardEffectTest {
             )
         )
 
-        val before = engine.getState()
+        engine.drawCardForPlayer("p0")
+        assertEquals("the draw should have been allowed", 3, engine.getState().players[0].cardCount)
+        assertEquals(
+            "a voluntary draw keeps the turn - they still have to play something",
+            0, engine.getState().currentPlayerIndex
+        )
+
+        val afterFirst = engine.getState()
         engine.drawCardForPlayer("p0")
         assertEquals(
-            "the draw should have been refused outright",
-            before.sequenceNumber, engine.getState().sequenceNumber
+            "the second draw on one turn is the fishing exploit, and must be refused",
+            afterFirst.sequenceNumber, engine.getState().sequenceNumber
         )
-        assertEquals(2, engine.getState().players[0].cardCount)
+        assertEquals(3, engine.getState().players[0].cardCount)
     }
 
     /** ...but a hand with nothing legal can still draw, or the turn could never advance. */

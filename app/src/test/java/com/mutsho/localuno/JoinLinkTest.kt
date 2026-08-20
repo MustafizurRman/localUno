@@ -36,6 +36,43 @@ class JoinLinkTest {
     }
 
     @Test
+    fun `the pin travels in the code and a scan needs no typing`() {
+        // The point of the change: scanning the host's screen already proves you are in the room,
+        // so the code carries the PIN rather than a flag saying one exists.
+        val original = JoinLink("192.168.0.5", 41621, "Kitchen", hasPin = true, pin = "3592")
+        val back = JoinLink.decode(original.encode())
+        assertEquals("3592", back?.pin)
+        assertEquals(true, back?.hasPin)
+    }
+
+    @Test
+    fun `a code carrying a pin is treated as locked even without the old flag`() {
+        // Belt and braces: `k` present but `pin=0` still means a locked table, so a guest can never
+        // end up trying to join a PINned lobby with no PIN in hand.
+        val raw = "localuno://join?h=10.0.0.4&p=5000&n=T&pin=0&k=1234"
+        val link = JoinLink.decode(raw)
+        assertEquals("1234", link?.pin)
+        assertEquals(true, link?.hasPin)
+    }
+
+    @Test
+    fun `an older code with only the flag still asks for the pin`() {
+        // A host on the previous build emits no `k`. That must stay joinable the old way rather
+        // than looking like an open table - the two phones at a table are often on two versions.
+        val raw = "localuno://join?h=10.0.0.4&p=5000&n=T&pin=1"
+        val link = JoinLink.decode(raw)
+        assertEquals(null, link?.pin)
+        assertEquals(true, link?.hasPin)
+    }
+
+    @Test
+    fun `an open table carries no pin at all`() {
+        val link = JoinLink.decode(JoinLink("1.2.3.4", 90, "x", hasPin = false).encode())
+        assertEquals(null, link?.pin)
+        assertEquals(false, link?.hasPin)
+    }
+
+    @Test
     fun `rejects codes that are not ours`() {
         // A scanner sees every QR in the world; none of these should start a connection.
         for (junk in listOf(

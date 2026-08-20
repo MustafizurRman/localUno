@@ -448,10 +448,9 @@ class GameEngine(
         val nextIndex = getNextPlayerFrom(state.currentPlayerIndex)
         val newPending = state.pendingDrawCount + amount
 
-        // In No Mercy mode, stacking is always on. In other modes, check settings.
-        // A genuine independent house rule now (HANDOFF_MENUS.md), not implicitly forced on for
-        // No Mercy - ModeSelectScreen defaults it on when No Mercy is picked, but the host can
-        // turn it off, same as any other mode.
+        // A genuine independent house rule, not implicitly forced on for No Mercy. The No Mercy
+        // table bundles it on, and a custom table can turn it off - the engine just reads the
+        // setting and has no opinion about which deck is in play.
         val stackingActive = settings.rules.stacking
 
         if (!stackingActive) {
@@ -813,6 +812,49 @@ class GameEngine(
      * In No Mercy: player must draw cards UNTIL they draw one they can play, then play it.
      * In Classic: player draws 1 card.
      */
+    /**
+     * The turn clock ran out on [playerId]. Always moves the game on.
+     *
+     * "Always" is the whole point. This used to be `drawCardForPlayer`, which refuses to draw for a
+     * player holding a playable card - so for the commonest case of all, someone with a perfectly
+     * good hand who simply walked away, the timeout did precisely nothing. The clock hit zero, the
+     * state came back unchanged, and the table sat there with no way forward but quitting.
+     *
+     * What it does is the host's [TimeoutAction] setting; SKIP everywhere unless a custom table asks
+     * for the harsher one. A live draw stack is not negotiable either way - it is already owed, so it
+     * is taken - and CHOOSING_SWAP has its own resolver.
+     */
+    fun applyTurnTimeout(playerId: String): GameState {
+        if (state.currentPlayer?.id != playerId) return state
+        if (state.phase != GamePhase.PLAYING) return state
+        val player = state.getPlayerById(playerId) ?: return state
+        val playerIndex = state.players.indexOf(player)
+
+        // An owed stack is taken regardless of the setting - it is a debt, not a penalty.
+        if (state.pendingDrawCount > 0) return drawCardForPlayer(playerId)
+
+        val hand = player.hand.toMutableList()
+        if (settings.turnTimeoutAction == TimeoutAction.DRAW_ONE) {
+            hand.addAll(drawCards(1))
+        }
+        val updatedPlayers = state.players.toMutableList()
+        // hasCalledUno is cleared for the same reason a draw clears it: the hand grew, or the turn
+        // passed without them ever declaring.
+        updatedPlayers[playerIndex] = player.copy(hand = hand, hasCalledUno = false)
+
+        state = state.copy(
+            players = updatedPlayers,
+            currentPlayerIndex = getNextPlayerFrom(playerIndex),
+            voluntaryDrawBy = null,
+            sequenceNumber = nextSequence()
+        )
+
+        if (settings.gameMode == GameMode.NO_MERCY) {
+            state = checkMercyRule()
+        }
+        return state
+    }
+
     fun drawCardForPlayer(playerId: String): GameState {
         if (state.currentPlayer?.id != playerId) return state
         if (state.phase != GamePhase.PLAYING) return state
@@ -843,21 +885,28 @@ class GameEngine(
             return state
         }
 
-        // You may only draw when you have nothing you can legally play. That IS the rule ("if you
-        // don't have a matching card, you must draw"), and enforcing it closes a real exploit that
-        // fell out of the Classic branch below: drawing a PLAYABLE card keeps the turn, and with
-        // nothing stopping a second draw a player could fish through the deck indefinitely on one
-        // turn, keeping the turn every time the card happened to be playable and stopping whenever
-        // they liked. It also removes the odd No Mercy case where tapping the deck with a perfectly
-        // good hand would draw-until-playable and auto-play something you never chose.
+        // Drawing is always allowed on your own turn, whether or not you hold something playable.
         //
-        // Deliberately placed AFTER the pending-draw branch above: when a stack is live, taking the
-        // penalty is a legitimate choice even though a stackable card would also be legal, so that
-        // path must stay open.
-        if (getPlayableCards(playerId).isNotEmpty()) return state
+        // It used to be refused outright while you had a legal card, on the reading that the rule is
+        // "if you don't have a matching card, you must draw". But that is a rule about when you MUST
+        // draw, not about when you MAY, and it took away an ordinary decision: holding a green +2 and
+        // a green 5 and wanting to keep both is a real choice, and the board simply ignored the tap.
+        //
+        // The refusal was closing a genuine exploit, and that still has to be closed: a drawn
+        // PLAYABLE card keeps the turn, so with unlimited draws a player could fish the deck all
+        // turn and stop whenever it suited them. The cap below - one voluntary draw per turn - closes
+        // it without removing the choice.
+        //
+        // This is also what made the turn clock do nothing. The timeout handler called this very
+        // function, it returned `state` untouched for anyone holding a playable card, and the turn
+        // never advanced; see [applyTurnTimeout].
+        val hasPlayable = getPlayableCards(playerId).isNotEmpty()
+        if (hasPlayable && state.voluntaryDrawBy == playerId) return state
 
-        if (settings.gameMode == GameMode.NO_MERCY) {
-            // No Mercy: draw until you get a playable card, then play it immediately
+        if (!hasPlayable && settings.gameMode == GameMode.NO_MERCY) {
+            // No Mercy: with nothing playable, draw until you get a card you can play and play it.
+            // Only when there was nothing to begin with - a VOLUNTARY draw must never auto-play a
+            // card the player didn't choose.
             return drawUntilPlayable(playerId, playerIndex)
         } else {
             // Classic: draw 1 card. If the drawn card is playable, keep the turn so the
@@ -869,13 +918,18 @@ class GameEngine(
             updatedPlayers[playerIndex] = player.copy(hand = updatedHand, hasCalledUno = false)
 
             val drawnCard = drawn.firstOrNull()
-            val keepTurn = drawnCard != null && isCardPlayableFromHand(drawnCard)
+            // A voluntary draw always keeps the turn - the player still holds something playable and
+            // has to actually play it. Otherwise the usual rule: keep the turn only if the card that
+            // came up can be played.
+            val keepTurn = hasPlayable || (drawnCard != null && isCardPlayableFromHand(drawnCard))
             val nextIndex = if (keepTurn) playerIndex else getNextPlayerFrom(playerIndex)
 
             state = state.copy(
                 players = updatedPlayers,
                 currentPlayerIndex = nextIndex,
                 pendingDrawCount = 0,
+                // Spent for this turn if it was voluntary; cleared outright once the turn moves on.
+                voluntaryDrawBy = if (!keepTurn) null else if (hasPlayable) playerId else state.voluntaryDrawBy,
                 sequenceNumber = nextSequence()
             )
             return state
