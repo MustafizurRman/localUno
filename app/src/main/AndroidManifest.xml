@@ -53,6 +53,21 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            Overrides the zxing library's own landscape-friendly CaptureActivity declaration - see
+            PortraitCaptureActivity. noHistory so a scanner left open is never what the task resumes
+            to: the app can otherwise be killed while scanning and come back to a camera with the
+            game nowhere in sight, which is a dead end with no obvious way out.
+        -->
+        <activity
+            android:name=".ui.components.PortraitCaptureActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:noHistory="true"
+            android:stateNotNeeded="true"
+            android:theme="@style/zxing_CaptureTheme"
+            android:windowSoftInputMode="stateAlwaysHidden" />
     </application>
 
 </manifest>

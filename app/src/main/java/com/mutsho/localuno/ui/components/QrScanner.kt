@@ -45,9 +45,15 @@ fun rememberQrJoinScanner(
                     setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                     setPrompt("Point at the host's QR code")
                     setBeepEnabled(false)
-                    // The host is usually holding their phone in portrait while the scanner holds
-                    // theirs however they grabbed it; locking orientation makes one of the two
-                    // aim awkwardly for no reason.
+                    // Portrait, always - every other screen in the app is, and a camera that swings
+                    // round while you are lining up someone else's phone is disorienting at exactly
+                    // the wrong moment. See PortraitCaptureActivity.
+                    setCaptureActivity(PortraitCaptureActivity::class.java)
+                    // Must stay FALSE, and it is what makes the line above work. `true` does not
+                    // mean "portrait" - it means "lock to whatever orientation the device is in
+                    // right now", which CaptureManager applies with its own
+                    // setRequestedOrientation() call at launch, overriding the manifest and landing
+                    // back in landscape for anyone holding the phone sideways.
                     setOrientationLocked(false)
                 }
             )
