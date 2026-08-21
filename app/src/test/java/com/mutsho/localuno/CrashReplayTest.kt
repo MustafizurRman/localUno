@@ -70,13 +70,45 @@ class CrashReplayTest {
         }
     }
 
-    @Test fun `the round the app died in ended in a swap`() {
-        // Not a correctness claim - a record of the position, so a later theory can be checked
-        // against what was actually on screen. The last two moves were a Discard All and then a 7
-        // with seven-swaps on, which means the board was holding the hand-transfer animation and
-        // the swap picker at the same moment.
+    /**
+     * The replay no longer ends where the real session did, and that is now the point of it.
+     *
+     * This used to assert CHOOSING_SWAP - the position actually on screen when the app died, with
+     * the board holding a hand transfer and the swap picker at the same moment. It stopped being
+     * true when the two-player Reverse Draw Four special case was removed from the engine, and the
+     * divergence is recorded here rather than quietly rewritten to match, because a replay that
+     * silently stops reproducing the captured position is a diagnostic tool that has become a
+     * decoration.
+     *
+     * Why a FOUR-seat table went through a two-player branch at all: this is No Mercy, so knockouts
+     * take players out mid-round, and the old branch keyed off the number of players still
+     * CONNECTED rather than the number of seats. The journal holds five Reverse Draw Fours, and by
+     * the time some of them were played the table really was down to two. So this recording is also
+     * direct evidence that the bug being fixed was reachable in an ordinary game, not a corner case.
+     *
+     * The moves before that point still replay identically, which is what the three tests above
+     * depend on - they walk the round move by move and stop mattering only after the divergence.
+     */
+    @Test fun `the replay diverges from the captured round at the reverse draw four fix`() {
         val engine = SeedJournal.replay(log())
         val s = engine.getState()
-        assertEquals(GamePhase.CHOOSING_SWAP, s.phase)
+
+        // Under current rules the round does not reach the swap the player was looking at.
+        assertEquals(GamePhase.PLAYING, s.phase)
+        assertTrue("the replay still has to get somewhere real", s.sequenceNumber > 100)
+    }
+
+    @Test fun `the captured table really did fall to two active players`() {
+        // The premise of the test above, checked rather than asserted in prose: without this, the
+        // explanation for the divergence is just a story someone told about a resource file.
+        val rec = SeedJournal.parse(log())
+        val everFellToTwo = rec.moves.indices.any { step ->
+            SeedJournal.replay(log(), upTo = step).getState()
+                .players.count { it.isConnected } == 2
+        }
+        assertTrue(
+            "a 4-seat table can only reach the old two-player branch via No Mercy knockouts",
+            everFellToTwo
+        )
     }
 }

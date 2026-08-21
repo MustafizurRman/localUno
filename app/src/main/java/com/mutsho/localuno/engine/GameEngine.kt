@@ -356,24 +356,26 @@ class GameEngine(
                 //
                 // See CardConservationTest, which fuzzes whole games and asserts the deck is a
                 // conserved multiset after every move.
-                val activePlayers = state.players.count { it.isConnected }
-                if (activePlayers == 2) {
-                    // With 2 active players: reverse acts as skip, so YOU draw 4 (per rules)
-                    val self = state.players[state.currentPlayerIndex]
-                    val drawn = drawCards(4)
-                    val updatedPlayers = state.players.toMutableList()
-                    val updatedHand = self.hand.toMutableList()
-                    updatedHand.addAll(drawn)
-                    updatedPlayers[state.currentPlayerIndex] = self.copy(hand = updatedHand)
-                    state.copy(
-                        direction = newDirection,
-                        players = updatedPlayers,
-                        currentPlayerIndex = nextIndex,
-                        pendingDrawCount = 0,
-                        lastDrawCardValue = 0,
-                        sequenceNumber = nextSequence()
-                    )
-                } else if (settings.rules.stacking) {
+                // No two-player special case, deliberately.
+                //
+                // There used to be one, and it was backwards on both halves: head to head it made
+                // the player who PLAYED the card draw the four themselves and then handed the turn
+                // to the opponent. So the card cost you four cards and your turn and gave your
+                // opponent a free move - the single worst card in the deck to hold, and the exact
+                // opposite of what it says. It also short-circuited stacking, so at a two-player
+                // table a Reverse Draw Four could not be answered while a Draw Two could.
+                //
+                // The reasoning it carried ("reverse acts as skip, so YOU draw 4") confused two
+                // different rules. A plain Reverse does collapse into a Skip head to head, because
+                // there is nobody between you and the only other seat. This card names a victim -
+                // whoever is next once the direction has flipped - and with two players the seat
+                // next in EITHER direction is the same one: your opponent. Never you.
+                //
+                // The general branches below already produce that, because nextIndex is computed in
+                // the new direction and there is only one other seat to land on: the opponent draws
+                // four and loses their turn, and it comes back to you - identical to how every
+                // other draw card behaves head to head. Removing the special case fixed it.
+                if (settings.rules.stacking) {
                     state.copy(
                         direction = newDirection,
                         currentPlayerIndex = nextIndex,
