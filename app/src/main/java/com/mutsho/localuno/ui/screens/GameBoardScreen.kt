@@ -1,11 +1,6 @@
 package com.mutsho.localuno.ui.screens
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,6 +21,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mutsho.localuno.model.*
+import com.mutsho.localuno.ui.components.LocalAmbientMotion
+import com.mutsho.localuno.ui.components.rememberSweepAngle
 import com.mutsho.localuno.ui.components.*
 import com.mutsho.localuno.ui.theme.*
 
@@ -101,15 +98,13 @@ fun GameBoardScreen(
             )
 
             // Slow conic light sweep - 9s linear, per the mockup.
-            val sweep = rememberInfiniteTransition(label = "sweep")
+            //
             // State, not `by` - read inside the Canvas draw lambda below. Delegated, this rotated
             // the felt by recomposing the board every frame for the entire game.
-            val angle = sweep.animateFloat(
-                initialValue = 0f,
-                targetValue = 360f,
-                animationSpec = infiniteRepeatable(tween(9000, easing = LinearEasing)),
-                label = "sweepAngle"
-            )
+            //
+            // Gated now as well: this used to turn for the whole round whether or not anybody was
+            // watching, which on a four-player table is most of it. See LocalAmbientMotion.
+            val angle = rememberSweepAngle(active = LocalAmbientMotion.current, periodMs = 9000)
             Canvas(modifier = Modifier.matchParentSize()) {
                 rotate(angle.value) {
                     drawArc(

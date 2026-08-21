@@ -1,10 +1,5 @@
 package com.mutsho.localuno.ui.components
 
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -380,18 +375,15 @@ fun HandArc(
             )
 
             // ── The glow under the needle ───────────────────────────────────
-            val pulse = rememberInfiniteTransition(label = "dialGlow")
             // State, not `by`. This scope composes the entire dial, including the keyed card
             // list, so delegating here recomposed the whole hand every frame for the whole
             // game - the same shape as the theta read that crashed this file before.
-            val glowAlpha = pulse.animateFloat(
-                initialValue = 0.45f,
-                targetValue = 0.85f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(1300),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "dialGlowAlpha"
+            //
+            // The glow marks the needle, so it matters most when a choice is being asked of you.
+            // While the table waits on somebody else it is decoration, and now rests.
+            val glowAlpha = rememberBreathing(
+                active = LocalAmbientMotion.current,
+                from = 0.45f, to = 0.85f, periodMs = 1300
             )
             Box(
                 modifier = Modifier

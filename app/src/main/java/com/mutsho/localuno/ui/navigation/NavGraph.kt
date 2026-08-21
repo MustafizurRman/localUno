@@ -14,7 +14,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.mutsho.localuno.model.GameSettings
+import com.mutsho.localuno.ui.components.KeepScreenOn
+import com.mutsho.localuno.ui.components.LocalAmbientMotion
 import com.mutsho.localuno.ui.components.LocalCardSkin
+import com.mutsho.localuno.ui.components.rememberAmbientActive
 import com.mutsho.localuno.ui.components.rememberTableHaptics
 import com.mutsho.localuno.ui.screens.*
 import kotlinx.coroutines.delay
@@ -435,6 +438,19 @@ fun AppNavigation() {
                 }
             }
 
+            // The board is the one screen you spend minutes not touching - waiting for three other
+            // people to take their turns - so it is the one screen that must not time out. Scoped
+            // to this route, so every other screen sleeps normally.
+            KeepScreenOn()
+
+            // One gate for every board skin, provided here rather than inside the scaffold so the
+            // felt - which each skin draws itself, outside the shared chrome - is covered too.
+            val ambientActive = rememberAmbientActive(
+                sequenceNumber = gameState.sequenceNumber,
+                isMyTurn = gameState.currentPlayer?.id == localPlayerId
+            )
+
+            CompositionLocalProvider(LocalAmbientMotion provides ambientActive) {
             UnoBoardScreen(
                 gameState = gameState,
                 localPlayerId = localPlayerId,
@@ -505,6 +521,7 @@ fun AppNavigation() {
                 getConnectionAgeMs = { gameViewModel.connectionAgeMs() },
                 turnAlertOn = turnAlertEnabled,
             )
+            }
         }
 
         composable(Routes.END) {

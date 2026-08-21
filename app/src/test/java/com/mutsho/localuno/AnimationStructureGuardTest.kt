@@ -86,6 +86,47 @@ class AnimationStructureGuardTest {
     // ── scanner ─────────────────────────────────────────────────────────────
 
     /** `if (` ... `.value` ... on one line, outside a comment. */
+    /**
+     * The board must not go back to animations that cannot be switched off.
+     *
+     * `rememberInfiniteTransition` requests a frame forever once started - there is no way to stop
+     * it. The board used four of them: a felt sweep, a draw-pile nudge, a dial glow and No Mercy's
+     * heat, all running for the whole round. A card game is mostly spent waiting for other people,
+     * so that was 60fps paid continuously for something nobody was looking at.
+     *
+     * They are now driven by an Animatable from a LaunchedEffect keyed on whether motion is wanted,
+     * which can genuinely stop (see AmbientMotion.kt). Reintroducing an infinite transition here
+     * would restore the cost silently - nothing would look wrong, the battery would just go.
+     *
+     * Scoped to the board files only. The menu and the join screen animate while somebody is
+     * definitely looking at them, and are none of this test's business.
+     */
+    @Test
+    fun `no board animation runs on a clock that cannot be stopped`() {
+        val boardFiles = listOf(
+            "components/BoardScaffold.kt",
+            "components/HandArc.kt",
+            "screens/GameBoardScreen.kt",
+            "screens/MercyBoardScreen.kt",
+            "screens/SideRailsBoardScreen.kt"
+        )
+        val offenders = boardFiles.mapNotNull { rel ->
+            val f = File(uiRoot, rel)
+            if (!f.isFile) return@mapNotNull null
+            val hits = f.readLines().withIndex().filter { (_, line) ->
+                "rememberInfiniteTransition" in line.substringBefore("//")
+            }
+            if (hits.isEmpty()) null
+            else "$rel: ${hits.joinToString { "line ${it.index + 1}" }}"
+        }
+        assertTrue(
+            "An infinite transition on the board cannot be gated, so it animates through every " +
+                "other player's turn. Use rememberBreathing/rememberSweepAngle instead.\n" +
+                offenders.joinToString("\n"),
+            offenders.isEmpty()
+        )
+    }
+
     private val branchOnValue = Regex("""\bif\s*\([^)]*\.value\b""")
 
     private fun violates(line: String): Boolean {

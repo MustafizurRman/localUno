@@ -7,11 +7,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.animation.core.EaseInOutSine
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -79,7 +74,9 @@ fun BoardScaffold(
     // (heatShadow = inset 0 0 (60 + pending*4)px), pulsing on ubGlow's 1.2s cycle. Drawn behind
     // the content and non-interactive.
     if (gameState.settings.gameMode == GameMode.NO_MERCY) {
-        val heat = rememberInfiniteTransition(label = "heat")
+        // Gated as well as read-in-draw now. The reasoning below is about WHERE the value is read;
+        // this is about whether it should be produced at all. A No Mercy round spends most of its
+        // time waiting on other people, and the heat is atmosphere rather than information.
         // A State, deliberately NOT delegated with `by`.
         //
         // `val heatAlpha by ...` reads the animation during COMPOSITION, and the value then fed
@@ -95,14 +92,9 @@ fun BoardScaffold(
         // people actually play on, which is No Mercy with every house rule on.
         //
         // Read in drawBehind instead: the pulse still animates, and nothing recomposes to do it.
-        val heatAlpha = heat.animateFloat(
-            initialValue = 0.25f,
-            targetValue = 0.8f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(1200, easing = EaseInOutSine),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "heatAlpha"
+        val heatAlpha = rememberBreathing(
+            active = LocalAmbientMotion.current,
+            from = 0.25f, to = 0.8f, periodMs = 1200
         )
         val spread = 60f + gameState.pendingDrawCount * 4f
         Box(
@@ -249,18 +241,18 @@ fun DrawPile(
      */
     mustDraw: Boolean = false
 ) {
-    val nudge = rememberInfiniteTransition(label = "drawNudge")
     // Slow enough to read as breathing rather than blinking - it has to be noticeable without
     // becoming the thing you are trying to ignore while you think.
     // State, not `by` - see `heatAlpha` above. This one is composed for the whole round too.
-    val pulse = nudge.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1100, easing = EaseInOutSine),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "drawPulse"
+    //
+    // Driven by mustDraw rather than by the ambient gate, because that IS the condition it exists
+    // for: this pulse is the board answering "what do I do now" for a player who cannot play a
+    // card. It used to breathe for the entire round regardless - through everyone else's turns,
+    // and through your own turns when you had perfectly good cards - which is both a waste and a
+    // weaker signal, since a cue that is always on says nothing when it matters.
+    val pulse = rememberBreathing(
+        active = mustDraw,
+        from = 0f, to = 1f, periodMs = 1100
     )
 
     Column(
