@@ -29,6 +29,17 @@ object CrashReporter {
 
     private const val FILE_NAME = "last-crash.txt"
 
+    /**
+     * Extra text to append to the report - in practice the round's replay log, set by GameViewModel
+     * on a debug build (see SeedJournal). A stack trace says where the app died; this says what the
+     * table was doing at the time, which is the half that lets anyone try it again.
+     *
+     * Volatile and defensive: it is read from the crashing thread, whichever that turns out to be,
+     * and anything it throws is swallowed by [install]'s try/catch rather than replacing the crash.
+     */
+    @Volatile
+    var extraContext: (() -> String)? = null
+
     fun install(context: Context) {
         val appContext = context.applicationContext
         val previous = Thread.getDefaultUncaughtExceptionHandler()
@@ -60,6 +71,12 @@ object CrashReporter {
             appendLine("android  : ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
             appendLine()
             append(stack)
+            val extra = try { extraContext?.invoke() } catch (_: Throwable) { null }
+            if (!extra.isNullOrBlank()) {
+                appendLine()
+                appendLine()
+                append(extra)
+            }
         }
         File(context.filesDir, FILE_NAME).writeText(report)
     }

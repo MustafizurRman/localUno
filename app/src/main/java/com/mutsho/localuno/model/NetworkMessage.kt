@@ -239,6 +239,24 @@ sealed class NetworkMessage {
      * timeout that's supposed to catch a genuinely dead connection would also fire on a perfectly
      * healthy one that just hasn't needed to send anything in a while.
      */
+    /**
+     * "I have committed a wild and am choosing its colour."
+     *
+     * The colour picker holds the played card on the PLAYER'S device until they pick, so nothing
+     * reaches the host in the meantime and the turn clock goes on running against somebody who has
+     * already acted. It then times them out and takes the turn away mid-choice.
+     *
+     * The host cannot see a picker on another phone, so the phone has to say so. [choosing] false
+     * releases the pause explicitly; a play arriving releases it too.
+     */
+    data class ChoosingColor(
+        val playerId: String,
+        val choosing: Boolean,
+        override val sequenceNumber: Long = 0
+    ) : NetworkMessage() {
+        override val type = "CHOOSING_COLOR"
+    }
+
     data class Ping(
         override val sequenceNumber: Long = 0
     ) : NetworkMessage() {

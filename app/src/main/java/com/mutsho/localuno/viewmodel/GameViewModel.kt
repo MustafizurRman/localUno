@@ -3,8 +3,11 @@ package com.mutsho.localuno.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.mutsho.localuno.BuildConfig
+import com.mutsho.localuno.CrashReporter
 import com.mutsho.localuno.engine.BotBrain
 import com.mutsho.localuno.engine.GameEngine
+import com.mutsho.localuno.engine.SeedJournal
 import com.mutsho.localuno.model.*
 import com.mutsho.localuno.network.GameClient
 import com.mutsho.localuno.network.GameServer
@@ -18,10 +21,20 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlin.random.Random
 
 class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
+        /** `adb logcat -s LocalUnoSeed` and the seed of every round played is there. */
+        private const val SEED_TAG = "LocalUnoSeed"
+
+        /**
+         * Where [saveSeedLog] leaves the last finished round, inside the app's private files dir:
+         * `adb shell run-as com.mutsho.localuno cat files/seed-log.txt`.
+         */
+        private const val SEED_LOG_FILE = "seed-log.txt"
+
         /**
          * How long a bot appears to think before moving. Randomised per turn because a fixed delay
          * makes a table of bots tick like a metronome, which reads as machinery rather than as
@@ -70,6 +83,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _gameState = MutableStateFlow(GameState())
     val gameState: StateFlow<GameState> = _gameState
+
+    /**
+     * The current round's replay recording, or null - which is every release build, and every guest
+     * device, since only the host runs an engine. Exposed so the board can show the seed and hand
+     * the whole log over. See [SeedJournal].
+     */
+    private val _seedJournal = MutableStateFlow<SeedJournal?>(null)
+    val seedJournal: StateFlow<SeedJournal?> = _seedJournal
 
     private val _localPlayerId = MutableStateFlow("")
     val localPlayerId: StateFlow<String> = _localPlayerId
@@ -173,10 +194,25 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         if (newState.currentPlayer?.id == _localPlayerId.value) return
         _showColorPicker.value = false
         pendingCard = null
+        endColorPick(_localPlayerId.value)
         viewModelScope.launch { _playRejectedEvent.emit("Too slow — your turn ended") }
     }
 
     private var pendingCard: Card? = null
+
+    /**
+     * Whose colour choice the turn clock is currently waiting on, if anyone.
+     *
+     * A wild is committed the instant it is tapped, but the card is held on that player's device
+     * until they pick a colour - so nothing reaches the engine and the clock carries on running
+     * against somebody who has already acted, then times them out mid-choice. The clock pauses
+     * while this is set.
+     *
+     * Host-authoritative like everything else here: a guest's picker is invisible from this phone,
+     * so the guest announces it with [NetworkMessage.ChoosingColor].
+     */
+    private var colorPickPendingFor: String? = null
+    private var colorPickCapJob: Job? = null
     private var disconnectCountdownJob: Job? = null
     private var turnTimerJob: Job? = null
     private var botJob: Job? = null
@@ -240,9 +276,21 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        gameEngine = GameEngine(settings)
+        // On a debug build the round is dealt from a recorded seed and every move is written down,
+        // so a bug seen once here can be replayed exactly on a desktop JVM. See SeedJournal.
+        // Release builds get the platform RNG and no journal, and pay nothing for this.
+        val journal = if (BuildConfig.DEBUG) SeedJournal(Random.nextLong()) else null
+        _seedJournal.value = journal
+        // If the process dies mid-round, the report carries the round with it.
+        CrashReporter.extraContext = journal?.let { { it.dump() } }
+        gameEngine = GameEngine(
+            settings,
+            journal?.let { Random(it.seed) } ?: Random,
+            journal
+        )
         val state = gameEngine!!.initializeGame(gamePlayers)
         applyHostState(state, resetTurnTimer = true)
+        journal?.let { announceSeed(it) }
 
         // Listen for player messages. Deliberately NOT Dispatchers.IO: handlePlayerMessage feeds
         // straight into gameEngine, a plain unsynchronized `var state` with no lock of its own.
@@ -387,6 +435,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             if (card.isWildCard()) {
                 pendingCard = card
                 _showColorPicker.value = true
+                // The host is its own player here, so it pauses its own clock directly.
+                beginColorPick(_localPlayerId.value)
             } else {
                 executePlayCard(_localPlayerId.value, card, null)
             }
@@ -395,6 +445,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             if (card.isWildCard()) {
                 pendingCard = card
                 _showColorPicker.value = true
+                // A picker on this phone is invisible to the host, so say so - otherwise the host's
+                // clock times this player out while they are still choosing.
+                gameClient?.send(
+                    NetworkMessage.ChoosingColor(_localPlayerId.value, choosing = true)
+                )
             } else {
                 gameClient?.send(
                     NetworkMessage.PlayCard(
@@ -406,8 +461,44 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Hold the turn clock while [playerId] picks a wild's colour.
+     *
+     * Capped rather than open-ended: a player who opens the picker and then walks away - or whose
+     * phone drops - would otherwise hold the round open for everyone with no way to move it on.
+     * The cap gives them one more clock's worth and then lets the timeout run exactly as it would
+     * have, so the worst case is the behaviour we had before, not a frozen table.
+     */
+    private fun beginColorPick(playerId: String) {
+        if (_gameState.value.currentPlayer?.id != playerId) return
+        colorPickPendingFor = playerId
+        turnTimerJob?.cancel()
+        colorPickCapJob?.cancel()
+        val capSeconds = _gameState.value.settings.turnTimeoutSeconds ?: return
+        colorPickCapJob = viewModelScope.launch {
+            delay(capSeconds * 1000L)
+            if (colorPickPendingFor != playerId) return@launch
+            endColorPick(playerId)
+            restartTurnTimer(_gameState.value)
+        }
+    }
+
+    private fun endColorPick(playerId: String?) {
+        if (playerId != null && colorPickPendingFor != playerId) return
+        colorPickPendingFor = null
+        colorPickCapJob?.cancel()
+        colorPickCapJob = null
+    }
+
     fun chooseColor(color: CardColor) {
         _showColorPicker.value = false
+        endColorPick(_localPlayerId.value)
+        if (!_isHost.value) {
+            // Release the host's pause even if the play itself is somehow dropped.
+            gameClient?.send(
+                NetworkMessage.ChoosingColor(_localPlayerId.value, choosing = false)
+            )
+        }
         val card = pendingCard ?: return
         pendingCard = null
 
@@ -922,6 +1013,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         if (phase != GamePhase.PLAYING && phase != GamePhase.CHOOSING_SWAP) return
         val timeoutSeconds = state.settings.turnTimeoutSeconds ?: return
         val playerId = state.currentPlayer?.id ?: return
+        // Paused mid-colour-choice: they have already committed a card, so the clock has nothing
+        // left to hurry. beginColorPick owns the cap that stops this being open-ended.
+        if (colorPickPendingFor == playerId) return
         val playerName = state.currentPlayer?.name ?: return
         val stamp = state.turnStartedAtMillis
 
@@ -960,7 +1054,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         when (message) {
             is NetworkMessage.JoinRequest -> handleRejoinRequest(playerId)
             is NetworkMessage.PlayCard -> {
+                // The play IS the end of any colour choice, whether or not the release arrives.
+                endColorPick(playerId)
                 executePlayCard(playerId, message.card, message.chosenColor)
+            }
+            is NetworkMessage.ChoosingColor -> {
+                // A guest has committed a wild and is picking its colour. Hold the clock for them,
+                // exactly as the host does for its own picker - see beginColorPick.
+                if (message.choosing) beginColorPick(playerId) else endColorPick(playerId)
             }
             is NetworkMessage.DrawCard -> {
                 val state = gameEngine?.drawCardForPlayer(playerId) ?: return
@@ -1068,6 +1169,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun handleGameOver() {
+        saveSeedLog()
         val state = _gameState.value
         val winner = state.getPlayerById(state.winnerId ?: "")
         val scores = gameEngine?.calculateScores() ?: emptyMap()
@@ -1158,7 +1260,40 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         return System.currentTimeMillis() - client.lastMessageAt.value
     }
 
+    /**
+     * Put the round's seed somewhere it can actually be retrieved, three ways over, because the
+     * three situations that need it are reached by different routes.
+     *
+     * Logcat is for a phone on a cable; the file is for a phone that is not, and is rewritten as the
+     * round goes so it survives being killed rather than crashing; the move-log line is for the
+     * player, who otherwise has no idea a seed exists and cannot quote one in a bug report. All
+     * three are debug-only - [SeedJournal] is never created on a release build.
+     */
+    private fun announceSeed(journal: SeedJournal) {
+        android.util.Log.i(SEED_TAG, "round dealt from seed ${journal.seed}")
+        _moveLog.value = (listOf(MoveLogEntry("seed ${journal.seed}", MoveLogTint.NEUTRAL))
+                + _moveLog.value).take(MOVE_LOG_LIMIT)
+    }
+
+    /**
+     * Write the current round's replay log to the app's private storage, overwriting the previous
+     * one. Called at the end of a round and when the game is torn down, which between them cover
+     * every way a round ends that isn't a crash - and a crash carries the log in its own report.
+     *
+     * Failure is ignored on purpose: this is a debugging aid, and a full disk must not take a game
+     * down with it.
+     */
+    private fun saveSeedLog() {
+        val journal = _seedJournal.value ?: return
+        try {
+            java.io.File(getApplication<Application>().filesDir, SEED_LOG_FILE)
+                .writeText(journal.dump())
+        } catch (_: Throwable) {
+        }
+    }
+
     fun resetGame() {
+        saveSeedLog()
         _moveLog.value = emptyList()
         _gameOver.value = false
         _showColorPicker.value = false

@@ -314,6 +314,31 @@ class EdgeProbeTest {
         assertNotNull(roundTrip(NetworkMessage.PlayRejected("too slow")) as? NetworkMessage.PlayRejected)
     }
 
+    @Test fun `choosing colour survives the wire`() {
+        val back = roundTrip(NetworkMessage.ChoosingColor("p1", true)) as? NetworkMessage.ChoosingColor
+        assertEquals("p1", back?.playerId)
+        assertEquals(true, back?.choosing)
+    }
+
+    @Test fun `releasing a colour choice survives the wire`() {
+        // The release matters as much as the notice: without it a dropped play would leave the
+        // host's clock paused on somebody who is no longer choosing anything.
+        val back = roundTrip(NetworkMessage.ChoosingColor("p1", false)) as? NetworkMessage.ChoosingColor
+        assertEquals(false, back?.choosing)
+    }
+
+    @Test fun `a colour notice with fields missing still parses`() {
+        // Cross-version shape check. A host on an older build has no CHOOSING_COLOR case at all and
+        // drops the message, which simply restores the old behaviour - the clock keeps running -
+        // and is covered by the unknown-type case above. What this pins down is the other
+        // direction: a notice arriving with fields absent must not blow up the read loop.
+        val back = MessageSerializer.deserialize(
+            """{"type":"CHOOSING_COLOR","payload":"{\"playerId\":\"p1\"}"}"""
+        ) as? NetworkMessage.ChoosingColor
+        assertEquals("p1", back?.playerId)
+        assertEquals("absent means not choosing", false, back?.choosing)
+    }
+
     @Test fun `ping survives the wire`() {
         assertNotNull(roundTrip(NetworkMessage.Ping()) as? NetworkMessage.Ping)
     }

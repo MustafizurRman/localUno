@@ -5,7 +5,12 @@ import com.mutsho.localuno.model.*
 class GameEngine(
     private val settings: GameSettings,
     /** Injectable only so a test can replay an exact deal - see DeckFactory.shuffle. */
-    private val random: kotlin.random.Random = kotlin.random.Random
+    private val random: kotlin.random.Random = kotlin.random.Random,
+    /**
+     * Where every move is written down so the round can be played again later. Null - which is what
+     * a release build passes - costs one null check per move and records nothing. See [SeedJournal].
+     */
+    private val journal: SeedJournal? = null
 ) {
 
     private var state: GameState = GameState(settings = settings)
@@ -35,6 +40,9 @@ class GameEngine(
     }
 
     fun initializeGame(players: List<Player>): GameState {
+        // Before the shuffle: the journal's header is the table as dealt, and seat order is half of
+        // what makes a seed reproducible.
+        journal?.begin(settings, players)
         val deck = DeckFactory.createDeckForMode(settings.gameMode)
         DeckFactory.shuffle(deck, random)
 
@@ -154,6 +162,7 @@ class GameEngine(
     }
 
     fun playCard(playerId: String, card: Card, chosenColor: CardColor? = null): GameState {
+        journal?.recordPlay(playerId, card, chosenColor)
         // Turn and phase are enforced HERE as well as in the caller.
         //
         // GameViewModel.executePlayCard already gates on canPlayCard before reaching this, so an
@@ -650,6 +659,7 @@ class GameEngine(
      * this player is knocked out immediately instead (no second grace period).
      */
     fun beginDisconnectCountdown(playerId: String): GameState {
+        journal?.record("disconnect", playerId)
         if (state.phase == GamePhase.PAUSED_DISCONNECT) {
             return disconnectAdditionalPlayer(playerId)
         }
@@ -695,6 +705,7 @@ class GameEngine(
      * for the round. They can still rejoin the NEXT round via a rematch.
      */
     fun reconnectPlayer(playerId: String): GameState {
+        journal?.record("reconnect", playerId)
         if (state.phase != GamePhase.PAUSED_DISCONNECT) return state
         if (state.disconnectedPlayerId != playerId) return state
         val player = state.getPlayerById(playerId) ?: return state
@@ -716,6 +727,7 @@ class GameEngine(
      * once it hits zero, knocks the disconnected player out and resumes the round without them.
      */
     fun tickDisconnectCountdown(): GameState {
+        journal?.record("tick")
         if (state.phase != GamePhase.PAUSED_DISCONNECT) return state
 
         val remaining = state.disconnectCountdown - 1
@@ -743,6 +755,7 @@ class GameEngine(
      * everyone else sees the exact same, already-handled "player is out" behavior.
      */
     fun playerLeft(playerId: String): GameState {
+        journal?.record("left", playerId)
         // Don't resume the round if we're paused waiting on a DIFFERENT player - knockOutPlayer's
         // resume path clears phase/disconnectedPlayerId/countdown wholesale, which would silently
         // cancel that player's grace period and leave them marked connected but unreachable,
@@ -825,6 +838,7 @@ class GameEngine(
      * is taken - and CHOOSING_SWAP has its own resolver.
      */
     fun applyTurnTimeout(playerId: String): GameState {
+        journal?.record("timeout", playerId)
         if (state.currentPlayer?.id != playerId) return state
         if (state.phase != GamePhase.PLAYING) return state
         val player = state.getPlayerById(playerId) ?: return state
@@ -856,6 +870,7 @@ class GameEngine(
     }
 
     fun drawCardForPlayer(playerId: String): GameState {
+        journal?.record("draw", playerId)
         if (state.currentPlayer?.id != playerId) return state
         if (state.phase != GamePhase.PLAYING) return state
         val player = state.getPlayerById(playerId) ?: return state
@@ -1012,6 +1027,7 @@ class GameEngine(
      * ends up holding a fresh hand has to call again.
      */
     fun chooseSwapTarget(chooserId: String, targetId: String): GameState {
+        journal?.record("swap", chooserId, targetId)
         if (state.phase != GamePhase.CHOOSING_SWAP) return state
         if (state.pendingSwapPlayerId != chooserId) return state
         if (chooserId == targetId) return state
@@ -1051,6 +1067,7 @@ class GameEngine(
      * for every 7 before the picker existed.
      */
     fun autoResolveSwap(): GameState {
+        journal?.record("autoswap")
         if (state.phase != GamePhase.CHOOSING_SWAP) return state
         val chooserId = state.pendingSwapPlayerId ?: return state
         val target = state.players
@@ -1072,6 +1089,7 @@ class GameEngine(
     }
 
     fun callUno(playerId: String): GameState {
+        journal?.record("uno", playerId)
         // Only during live play. Without this a CallUno arriving after the round ended still
         // mutated the finished state and bumped the sequence number, which pushed applyHostState
         // back down its ROUND_OVER branch and re-broadcast GameOver on top of a completed game;
@@ -1116,6 +1134,7 @@ class GameEngine(
     }
 
     fun penalizeUnoNotCalled(reporterId: String, targetPlayerId: String): GameState {
+        journal?.record("catch", reporterId, targetPlayerId)
         // Same reasoning as callUno: catching someone is only meaningful while the round is live.
         if (state.phase != GamePhase.PLAYING) return state
 

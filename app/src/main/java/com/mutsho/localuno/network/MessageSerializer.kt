@@ -39,6 +39,7 @@ object MessageSerializer {
                 "PLAY_REJECTED" -> gson.fromJson(wrapper.payload, NetworkMessage.PlayRejected::class.java)
                 "HOST_ENDED_GAME" -> gson.fromJson(wrapper.payload, NetworkMessage.HostEndedGame::class.java)
                 "CHOOSE_SWAP_TARGET" -> gson.fromJson(wrapper.payload, NetworkMessage.ChooseSwapTarget::class.java)
+                "CHOOSING_COLOR" -> gson.fromJson(wrapper.payload, NetworkMessage.ChoosingColor::class.java)
                 "PING" -> gson.fromJson(wrapper.payload, NetworkMessage.Ping::class.java)
                 else -> null
             }

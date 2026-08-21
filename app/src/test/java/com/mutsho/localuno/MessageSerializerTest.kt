@@ -97,6 +97,7 @@ class MessageSerializerTest {
         NetworkMessage.PlayRejected("Too slow", sequenceNumber = 28),
         NetworkMessage.HostEndedGame("The host ended the game", sequenceNumber = 29),
         NetworkMessage.ChooseSwapTarget("p3", sequenceNumber = 30),
+        NetworkMessage.ChoosingColor("p2", choosing = true, sequenceNumber = 32),
         NetworkMessage.Ping(sequenceNumber = 31)
     )
 

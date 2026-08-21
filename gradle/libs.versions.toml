@@ -7,6 +7,12 @@ junitVersion = "1.2.1"
 espressoCore = "3.6.1"
 appcompat = "1.7.0"
 material = "1.12.0"
+# Bumped from BOM 2023.10.01 / compiler 1.5.4 (with kotlin 1.9.0 -> 1.9.22, which the compiler
+# version is pinned to) while chasing the intermittent slot-table crash in the recomposer. It did
+# NOT fix it: the identical trace - IndexOutOfBounds in Stack.pop under endRoot, with no application
+# frames - reproduces on both. Kept anyway, deliberately: nothing regressed on the newer runtime and
+# it is the supported pairing for this Kotlin. Recorded here rather than only in the commit that
+# made the change, so the next person to look does not repeat the experiment.
 composeBom = "2024.02.00"
 composeCompiler = "1.5.8"
 activityCompose = "1.8.2"
