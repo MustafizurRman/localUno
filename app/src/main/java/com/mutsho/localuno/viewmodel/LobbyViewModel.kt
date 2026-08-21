@@ -729,7 +729,11 @@ class LobbyViewModel(application: Application) : AndroidViewModel(application) {
 
                 val newPlayer = PlayerInfo(
                     id = message.playerId,
-                    name = message.playerName,
+                    // Cleaned here, at the one place an untrusted name enters, rather than at the
+                    // dozen places it is drawn - see Sanitize. Unbounded and unfiltered, it reached
+                    // every screen at the table and could write extra lines into everyone's move
+                    // log by containing a newline.
+                    name = Sanitize.displayName(message.playerName),
                     avatarColor = message.avatarColor,
                     isHost = _players.value.getOrNull(existing)?.isHost ?: false,
                     isConnected = true

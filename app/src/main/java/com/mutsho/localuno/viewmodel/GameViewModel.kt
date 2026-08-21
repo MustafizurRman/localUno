@@ -1147,10 +1147,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 applyHostState(state, resetTurnTimer = false)
             }
             is NetworkMessage.EmojiReaction -> {
-                // Relay to the other clients, and show it on the host too - the host is a player,
-                // not just a relay, so without the local emit it never saw anyone else's reaction.
-                gameServer?.broadcastExcept(playerId, message)
-                viewModelScope.launch { _emojiEvent.emit(message) }
+                // Bounded and filtered before it is relayed. The field is an unrestricted String
+                // that every device at the table renders, so it was an unbounded broadcast channel
+                // nobody designed - and, like the display name, could carry newlines and
+                // zero-width characters. A reaction that cleans away to nothing is dropped rather
+                // than replaced, since a substitute nobody chose is worse than silence.
+                val clean = Sanitize.emoji(message.emoji) ?: return
+                // Re-addressed from the CONNECTION's id, not the payload's, so a relayed reaction
+                // cannot be attributed to somebody else.
+                val safe = NetworkMessage.EmojiReaction(playerId, clean)
+                gameServer?.broadcastExcept(playerId, safe)
+                // `safe`, not `message` - the host is a player too, and relaying the cleaned copy
+                // to everyone else while rendering the raw one locally would leave the host as the
+                // single device still showing the unbounded string.
+                viewModelScope.launch { _emojiEvent.emit(safe) }
             }
             is NetworkMessage.ChooseSwapTarget -> {
                 // chooserId comes from the connection, not the payload - the message only carries

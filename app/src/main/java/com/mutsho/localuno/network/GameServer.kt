@@ -29,6 +29,22 @@ class GameServer {
          * player, and a rejected joiner's socket lingers until it is closed.
          */
         private const val CONNECTION_HEADROOM = 6
+
+        /**
+         * Messages one connection may send per [FLOOD_WINDOW_MS] before it is dropped.
+         *
+         * Nothing rate-limited an ACCEPTED client. The PIN gate guards the door and the line cap
+         * bounds a single message, but once inside, a peer could send valid messages as fast as the
+         * socket allowed - each one parsed, dispatched to two collectors, and for a play, run
+         * through the engine and broadcast to every other device. One phone could keep the whole
+         * table busy.
+         *
+         * Set far above real play. A human generates a handful of messages a turn and the heartbeat
+         * adds one every four seconds; even a bot-heavy table nowhere near approaches this. It is a
+         * ceiling on abuse, not a pacing mechanism.
+         */
+        private const val MAX_MESSAGES_PER_WINDOW = 120
+        private const val FLOOD_WINDOW_MS = 10_000L
     }
 
     /**
@@ -152,8 +168,23 @@ class GameServer {
                 }
 
                 // Read messages from client
+                var windowStart = System.currentTimeMillis()
+                var inWindow = 0
+
                 while (isActive && !socket.isClosed) {
                     val line = reader.readBoundedLine() ?: break
+
+                    // Flood control, counted per connection. See MAX_MESSAGES_PER_WINDOW.
+                    val now = System.currentTimeMillis()
+                    if (now - windowStart >= FLOOD_WINDOW_MS) {
+                        windowStart = now
+                        inWindow = 0
+                    }
+                    if (++inWindow > MAX_MESSAGES_PER_WINDOW) {
+                        Log.w(TAG, "Dropping ${connection.playerId} - flooding")
+                        break
+                    }
+
                     val message = MessageSerializer.deserialize(line)
                     if (message != null) {
                         // A JoinRequest no longer rebinds anything here.
