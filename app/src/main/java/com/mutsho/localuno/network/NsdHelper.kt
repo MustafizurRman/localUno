@@ -259,14 +259,35 @@ class NsdHelper(private val context: Context) {
             override fun onServiceResolved(info: NsdServiceInfo) {
                 mainHandler.removeCallbacks(timeoutRunnable)
                 Log.d(TAG, "Service resolved: ${info.host}:${info.port}")
+                // Everything below is chosen by whoever broadcast the advertisement, and mDNS is
+                // unauthenticated - anyone on the network can announce a table with any name, mode
+                // and numbers. None of it used to be checked, even though the same values arriving
+                // by QR code are. See LobbyAdvert.
+                val host = LobbyAdvert.host(info.host?.hostAddress)
+                val port = LobbyAdvert.port(info.port)
+                if (host == null || port == null) {
+                    // A table we cannot legitimately connect to is noise at best. Dropped rather
+                    // than listed, so nobody taps a row that points at a privileged port or nowhere.
+                    Log.w(TAG, "Ignoring advert with unusable address")
+                    finish()
+                    return
+                }
+
                 val lobbyInfo = LobbyInfo(
-                    name = info.attributes["lobby"]?.let { String(it) } ?: info.serviceName,
+                    name = LobbyAdvert.name(
+                        raw = info.attributes["lobby"]?.let { String(it) },
+                        fallback = info.serviceName
+                    ),
                     serviceName = info.serviceName,
-                    host = info.host.hostAddress ?: "",
-                    port = info.port,
-                    gameMode = info.attributes["mode"]?.let { String(it) } ?: "CLASSIC",
-                    playerCount = info.attributes["count"]?.let { String(it).toIntOrNull() } ?: 1,
-                    maxPlayers = info.attributes["max"]?.let { String(it).toIntOrNull() } ?: 6,
+                    host = host,
+                    port = port,
+                    gameMode = LobbyAdvert.mode(info.attributes["mode"]?.let { String(it) }),
+                    playerCount = LobbyAdvert.seats(
+                        info.attributes["count"]?.let { String(it).toIntOrNull() }, default = 1
+                    ),
+                    maxPlayers = LobbyAdvert.seats(
+                        info.attributes["max"]?.let { String(it).toIntOrNull() }, default = 6
+                    ),
                     hasPin = info.attributes["pin"]?.let { String(it) == "1" } ?: false
                 )
                 onLobbyFound(lobbyInfo)
