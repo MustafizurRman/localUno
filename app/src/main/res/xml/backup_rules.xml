@@ -1,13 +1,19 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older that API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Backup rules for Android 11 and below (API 30-). API 31+ uses data_extraction_rules.xml.
+
+    This file used to be the commented-out template, which meant "everything in the app's data
+    directory leaves the device" was the default rather than a decision. It is now a decision.
+
+    What the app stores is one SharedPreferences file, localuno_prefs: a display name, an avatar
+    colour index, games played and won, two skin preferences, and a random per-device UUID used as
+    the player id. Nothing secret, nothing about anyone else, and no table PIN - a PIN lives only in
+    the hosting screen's state for the life of that lobby and is never written to disk.
+
+    So backup stays ON: restoring your name, your stats and your identity onto a new phone is a
+    small kindness and costs nothing. The rule is explicit rather than implicit so that if anything
+    sensitive is ever added to these preferences, whoever adds it has to come here and say so.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <include domain="sharedpref" path="localuno_prefs.xml" />
 </full-backup-content>

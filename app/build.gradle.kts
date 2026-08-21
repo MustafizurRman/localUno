@@ -22,7 +22,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // See proguard-rules.pro before changing this. The wire format is reflected over by
+            // Gson, so R8 renaming a field in `model` silently breaks multiplayer in a way no unit
+            // test can catch - they run on the JVM against unminified classes.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

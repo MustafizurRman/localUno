@@ -8,14 +8,18 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Bluetooth permissions for fallback transport -->
-    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <!--
+        No Bluetooth permissions. Five of them were declared for a "fallback transport" that was
+        never built - nothing in the codebase has ever touched Bluetooth, and the transport is mDNS
+        plus TCP over Wi-Fi. BLUETOOTH_SCAN in particular is a runtime permission that reads as
+        location-adjacent, so a card game was asking for something alarming and unused. Removed.
 
-    <!-- Nearby devices -->
+        Kept deliberately: NEARBY_WIFI_DEVICES. It is not requested at runtime and so is never
+        actually granted, which means nothing today can depend on it - but NsdManager's behaviour
+        around it varies by OEM build, and discovery is the feature the whole app rests on. Left in
+        place rather than removed on the same afternoon as everything else; if it goes, discovery
+        needs testing across two real devices first.
+    -->
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
 
     <!-- Turn alert. Compose's own HapticFeedback only exposes LongPress/TextHandleMove, which is
