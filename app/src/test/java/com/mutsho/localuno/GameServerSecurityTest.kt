@@ -194,24 +194,31 @@ class GameServerSecurityTest {
 
     @Test fun `connections beyond the cap are refused`() = withServer(maxPlayers = 2) { _, port, _ ->
         // maxPlayers 2 plus CONNECTION_HEADROOM 6 = 8 accepted; the rest are closed at the door.
+        //
+        // The assertion is the exact number, not "more than none". An earlier version of this test
+        // asserted `dead + refused > 0`, which would have passed with a cap of a thousand, or with
+        // no cap at all if a single socket happened to die - a test that cannot fail for the reason
+        // it is named after.
         val sockets = mutableListOf<Socket>()
-        var refused = 0
         repeat(14) {
-            try {
-                val s = Socket("127.0.0.1", port)
-                sockets += s
-                s.soTimeout = 1_000
+            runCatching { Socket("127.0.0.1", port) }.getOrNull()?.let {
+                it.soTimeout = 800
+                sockets += it
+            }
+            delay(40)   // let the accept loop deal with each one in turn
+        }
+        delay(600)
+
+        // A refused socket still connects - the OS backlog completes the handshake - and is then
+        // closed by the server, so "alive" means "the server kept it".
+        val alive = sockets.count { s ->
+            try { s.getInputStream().read() != -1 } catch (_: java.net.SocketTimeoutException) {
+                true   // nothing to read yet, but still open: accepted
             } catch (_: Exception) {
-                refused++
+                false
             }
         }
-        delay(500)
-        // A refused socket connects (the OS backlog accepts it) and is then closed by the server.
-        val dead = sockets.count { s ->
-            try { s.getInputStream().read() == -1 } catch (_: Exception) { true }
-        }
-        assertTrue("expected some connections to be refused, got $dead dead + $refused rejected",
-            dead + refused > 0)
+        assertEquals("exactly maxPlayers + headroom should survive", 8, alive)
         sockets.forEach { runCatching { it.close() } }
     }
 

@@ -684,55 +684,39 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val engine = gameEngine ?: return
         val playerId = request.playerId
 
-        // The PIN, which this path never checked at all.
-        //
-        // The lobby's handler bows out entirely once the round starts, so nothing was validating
-        // it on the one route that admits somebody mid-match. Narrow in practice - reconnectPlayer
-        // below still requires the table to be paused on this exact player's disconnect - but the
-        // PIN is the table's only access control and it was simply not consulted.
+        // Every decision below is RejoinGate's - see there for why it is a pure function rather
+        // than a run of `if`s in this file, and why the ORDER of its checks is the security
+        // property. The engine is only touched inside attemptResume, which the gate does not call
+        // until the PIN has been accepted.
         val expectedPin = _gameState.value.settings.pin
-        if (expectedPin != null) {
-            val verdict = pinGate?.check(clientId, request.pin, expectedPin, System.currentTimeMillis())
-            if (verdict != null && verdict !is PinGate.Verdict.Ok) {
-                gameServer?.sendThenDisconnect(
-                    clientId,
-                    NetworkMessage.JoinResponse(accepted = false, reason = "Invalid PIN")
-                )
-                return
+        var resumed: GameState? = null
+
+        val verdict = RejoinGate.decide(
+            isHost = true,
+            pinRequired = expectedPin != null,
+            pinAccepted = expectedPin == null || pinGate?.check(
+                clientId, request.pin, expectedPin, System.currentTimeMillis()
+            ).let { it == null || it is PinGate.Verdict.Ok },
+            seatHeldByLiveConnection = gameServer?.isPlayerIdLive(playerId) == true,
+            wasInThisMatch = { engine.getState().getPlayerById(playerId) != null },
+            attemptResume = {
+                val before = engine.getState().sequenceNumber
+                val next = engine.reconnectPlayer(playerId)
+                if (next.sequenceNumber != before) { resumed = next; true } else false
             }
-        }
+        )
 
-        // Refuse outright if a live connection still holds this seat: a genuine reconnect arrives
-        // on a dead socket, so anything else is somebody claiming a player who never left.
-        if (gameServer?.isPlayerIdLive(playerId) == true) {
-            gameServer?.sendThenDisconnect(
-                clientId,
-                NetworkMessage.JoinResponse(accepted = false, reason = "That player is already connected")
-            )
-            return
-        }
-
-        val before = engine.getState().sequenceNumber
-        val resumed = engine.reconnectPlayer(playerId)
-        if (resumed.sequenceNumber == before) {
-            // Two very different people land here and they deserve different answers. Someone who
-            // was never at this table is a stranger whose Join tap found a match already underway;
-            // someone who IS on the roster tried to resume a seat that can no longer be resumed
-            // (knocked out, or their grace window already expired). Telling a first-time joiner
-            // they "can't rejoin" describes something they never did.
-            val wasInThisMatch = engine.getState().getPlayerById(playerId) != null
+        if (verdict is RejoinGate.Verdict.Refuse) {
             // Addressed by clientId - the connection has not been bound to the player id, and after
             // a refusal it never will be.
             gameServer?.sendThenDisconnect(
                 clientId,
-                NetworkMessage.JoinResponse(
-                    accepted = false,
-                    reason = if (wasInThisMatch) "Can't rejoin — your seat is gone"
-                    else "Game already in progress"
-                )
+                NetworkMessage.JoinResponse(accepted = false, reason = verdict.reason)
             )
             return
         }
+
+        val resumedState = resumed ?: return
 
         // Accepted, so the claim finally becomes an identity.
         if (gameServer?.bindPlayerId(clientId, playerId) != true) {
@@ -749,7 +733,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         // but sending the acceptance first means their own UI can leave any "reconnecting" state
         // the instant the response lands rather than waiting on the state broadcast right behind it.
         gameServer?.sendToClient(playerId, NetworkMessage.JoinResponse(accepted = true, assignedId = playerId))
-        applyHostState(resumed, resetTurnTimer = true)
+        applyHostState(resumedState, resetTurnTimer = true)
     }
 
     private fun handlePlayerDisconnected(playerId: String) {
