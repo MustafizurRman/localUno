@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.mutsho.localuno.model.Card
 import com.mutsho.localuno.model.NetworkMessage
+import com.mutsho.localuno.model.WireLimits
 
 object MessageSerializer {
     private val gson: Gson = GsonBuilder().create()
@@ -134,7 +135,18 @@ object MessageSerializer {
                     playerHand != null && playerHand.all { it.ok() } &&
                     opponentCardCounts != null && phase != null &&
                     currentPlayerId != null && opponentHasCalledUno != null &&
-                    opponentConnected != null
+                    opponentConnected != null &&
+                    // Counts are ALLOCATION SIZES on the receiving side, so an absurd one is not a
+                    // strange value - it is an instruction to allocate that much. A string costs
+                    // what it weighs; a count costs whatever it says, which is why the line cap is
+                    // no defence: `{"p1":2000000000}` is twenty bytes. See WireLimits.
+                    playerHand.size <= WireLimits.MAX_HAND_CARDS &&
+                    opponentCardCounts.size <= WireLimits.MAX_PLAYERS &&
+                    opponentCardCounts.values.all {
+                        WireLimits.isPlausibleCount(it, WireLimits.MAX_HAND_CARDS)
+                    } &&
+                    WireLimits.isPlausibleCount(pendingDrawCount, WireLimits.MAX_PENDING_DRAW) &&
+                    WireLimits.isPlausibleCount(drawPileCount, WireLimits.MAX_DECK_CARDS)
             is NetworkMessage.PlayCard -> playerId != null && card.ok()
             is NetworkMessage.DrawCard -> playerId != null
             is NetworkMessage.CallUno -> playerId != null

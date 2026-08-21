@@ -1,6 +1,7 @@
 package com.mutsho.localuno.viewmodel
 
 import com.mutsho.localuno.model.Card
+import com.mutsho.localuno.model.WireLimits
 import com.mutsho.localuno.model.CardColor
 import com.mutsho.localuno.model.CardType
 import com.mutsho.localuno.model.GameState
@@ -104,7 +105,15 @@ internal fun applyStateUpdate(
         message.roundStartedAtMillis == previous.roundStartTime
     if (sameRound && message.sequenceNumber < previous.sequenceNumber) return previous
 
-    fun hidden(count: Int) = MutableList(count) {
+    // Clamped, not trusted. MessageSerializer already refuses a StateUpdate carrying an implausible
+    // count, so this is the second of two guards - the same reasoning GameEngine.playCard gives for
+    // enforcing turn and phase itself rather than relying on its caller.
+    //
+    // It matters more here than most double-checks, because the failure is not a wrong number on
+    // screen: `count` is used as an ALLOCATION SIZE, so a hostile value is a request for as much
+    // memory as it names. `{"p1":2000000000}` is twenty bytes on the wire and two billion cards on
+    // this side, and a negative one throws before it even gets that far.
+    fun hidden(count: Int) = MutableList(count.coerceIn(0, WireLimits.MAX_HAND_CARDS)) {
         Card(id = -1, color = CardColor.WILD, type = CardType.WILD)
     }
 

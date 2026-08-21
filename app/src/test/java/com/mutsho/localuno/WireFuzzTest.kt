@@ -186,6 +186,56 @@ class WireFuzzTest {
         assertTrue(m!!.reason.isNotBlank())
     }
 
+    // ── Counts, which are allocation sizes on the far side ──────────────────
+    //
+    // The worst shape on this wire. A string costs what it weighs; a COUNT costs whatever it says.
+    // opponentCardCounts was turned straight into MutableList(count) by the receiver, so twenty
+    // bytes of JSON asked every guest to allocate as many cards as the number named. The line cap
+    // is no defence at all here - the message really is tiny.
+
+    private fun stateUpdateWith(counts: String, extra: String = ""): NetworkMessage? = parse(
+        "STATE_UPDATE",
+        ("""{"currentPlayerIndex":0,"direction":"CLOCKWISE",
+          "topCard":{"id":1,"color":"RED","type":"THREE"},"currentColor":"RED",
+          "playerHand":[],"opponentCardCounts":$counts,"pendingDrawCount":0,
+          "phase":"PLAYING"$extra}""").replace(Regex("\\s+"), "")
+    )
+
+    @Test fun `a two-billion card opponent is rejected`() {
+        assertNull(stateUpdateWith("""{"p1":2000000000}"""))
+    }
+
+    @Test fun `a negative card count is rejected`() {
+        // MutableList(-1) throws rather than allocating, so this one crashes even sooner.
+        assertNull(stateUpdateWith("""{"p1":-1}"""))
+    }
+
+    @Test fun `a count just past the deck size is rejected`() {
+        assertNull(stateUpdateWith("""{"p1":${com.mutsho.localuno.model.WireLimits.MAX_HAND_CARDS + 1}}"""))
+    }
+
+    @Test fun `a realistic count is accepted`() {
+        // The control: No Mercy knocks a player out at 25, so real hands are far below the cap.
+        assertNotNull(stateUpdateWith("""{"p1":30}"""))
+    }
+
+    @Test fun `a hostile roster size is rejected`() {
+        val many = (1..5000).joinToString(",") { """"p$it":1""" }
+        assertNull(stateUpdateWith("{$many}"))
+    }
+
+    @Test fun `an absurd pending draw is rejected`() {
+        assertNull(stateUpdateWith("""{"p1":5}""", ""","pendingDrawCount":999999999"""))
+    }
+
+    @Test fun `an absurd draw pile is rejected`() {
+        assertNull(stateUpdateWith("""{"p1":5}""", ""","drawPileCount":2000000000"""))
+    }
+
+    @Test fun `a negative pending draw is rejected`() {
+        assertNull(stateUpdateWith("""{"p1":5}""", ""","pendingDrawCount":-5"""))
+    }
+
     // ── Random mutation ─────────────────────────────────────────────────────
 
     @Test fun `randomly corrupted real messages never throw`() {
