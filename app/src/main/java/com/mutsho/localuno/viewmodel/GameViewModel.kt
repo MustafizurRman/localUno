@@ -744,11 +744,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         // Choosing a seat is its own decision and gets its own full window.
         val startsFreshClock =
             newState.phase == GamePhase.PLAYING || newState.phase == GamePhase.CHOOSING_SWAP
-        val stamped = if (resetTurnTimer && startsFreshClock) {
-            newState.copy(turnStartedAtMillis = System.currentTimeMillis())
-        } else {
-            newState
-        }
+        // Always restamped, never passed through: see turnClockStamp for why the engine's own value
+        // is meaningless and what passing it through used to break - declaring UNO stopped the
+        // clock outright, on every device, and so did catching someone or a BOT doing either.
+        val stamped = newState.copy(
+            turnStartedAtMillis = turnClockStamp(
+                previousStamp = prevState.turnStartedAtMillis,
+                startsFreshTurn = resetTurnTimer && startsFreshClock,
+                nowMillis = System.currentTimeMillis()
+            )
+        )
         _gameState.value = stamped
         updatePlayableCards()
         dismissStaleColorPicker(stamped)

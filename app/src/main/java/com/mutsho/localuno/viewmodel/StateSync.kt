@@ -176,3 +176,30 @@ internal fun applyStateUpdate(
         sequenceNumber = message.sequenceNumber
     )
 }
+
+/**
+ * Decide what turn-clock stamp a freshly-computed host state should carry.
+ *
+ * Separated out because getting it wrong is invisible. `turnStartedAtMillis` is owned by the
+ * ViewModel, not the engine: the engine has never heard of the field and its own copy of the state
+ * has sat at 0L since the deal. So EVERY state handed back by an engine call carries a meaningless
+ * stamp, and the only question is which real one to put on it.
+ *
+ * Two answers, and previously only one of them was implemented:
+ *  - the move started a new turn, so the clock restarts from [nowMillis];
+ *  - the move did not, so the turn keeps the deadline it already had - [previousStamp].
+ *
+ * The second case used to pass the engine's state through untouched, which is not "leave the clock
+ * alone" but "set the clock to 0". That is what let declaring UNO stop the clock: a 0 stamp reads
+ * as "turn not started", so every countdown froze at full and the armed timeout, finding a stamp
+ * that no longer matched its own, concluded the turn had moved on and never fired.
+ *
+ * @param startsFreshTurn whether the caller is restarting the clock AND the new phase is one that
+ *   runs a clock at all. A phase with no clock (round over, paused for a disconnect) keeps the old
+ *   stamp too - it is not read while it is not running, and it is the honest value if play resumes.
+ */
+internal fun turnClockStamp(
+    previousStamp: Long,
+    startsFreshTurn: Boolean,
+    nowMillis: Long
+): Long = if (startsFreshTurn) nowMillis else previousStamp
