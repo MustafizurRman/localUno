@@ -78,6 +78,125 @@ class ComposableReturnGuardTest {
         )
     }
 
+    /**
+     * The same bug without a label on it.
+     *
+     * `return@Column` is the recognisable form, but a BARE `return` inside an inline composable
+     * lambda is a non-local return too - it leaves the enclosing function from inside the lambda,
+     * past exactly the same end-group calls:
+     *
+     *     Column {
+     *         if (x) return      // <- identical damage, no label to grep for
+     *         Text("hi")
+     *     }
+     *
+     * It is legal Kotlin and reads as even more ordinary than the labelled version, so it is the
+     * one a person is likelier to write. The labelled guard above would never see it.
+     *
+     * A bare `return` at the TOP of a composable function, before any lambda is open, is a
+     * different thing and is fine - the compiler emits the end calls on that path. Only returns
+     * made while an inline composable lambda is open are counted, which is why this tracks a stack
+     * of open lambdas rather than just matching text.
+     */
+    @Test fun `no inline composable lambda is returned out of without a label either`() {
+        val offenders = mutableListOf<String>()
+        uiSources().forEach { file ->
+            offenders += scanBareReturns(file.readLines()).map { (line, text) ->
+                "${file.name}:$line  $text"
+            }
+        }
+        assertTrue(
+            "A bare `return` inside an inline composable lambda is a non-local return and " +
+                "unbalances the group stack exactly as `return@Column` does.\n" +
+                offenders.joinToString("\n"),
+            offenders.isEmpty()
+        )
+    }
+
+    /**
+     * Returns (lineNumber, text) for every bare `return` made while an inline composable lambda is
+     * open. Brace counting, not parsing - good enough because it only has to be right about which
+     * scopes are open, and a stray brace inside a string would have to also coincide with a bare
+     * return to matter.
+     */
+    private fun scanBareReturns(lines: List<String>): List<Pair<Int, String>> {
+        val opensLambda = Regex("""\b(${forbidden.joinToString("|")})\s*[({]""")
+        val localFun = Regex("""\bfun\s+\w+\s*\(""")
+        val bareReturn = Regex("""(^|[\s{;])return\s*($|[^@\w])""")
+        val openDepths = ArrayDeque<Int>()
+        // Local helper functions declared inside a composable. A `return` in one of those is an
+        // ordinary return from that helper - it never crosses a composition group. Without this
+        // the guard fires on HandTransferOverlay's seatOffset/easedAt and HandArc's, all of which
+        // are correct code, and a guard that cries wolf gets deleted rather than fixed.
+        val funDepths = ArrayDeque<Int>()
+        var depth = 0
+        val out = mutableListOf<Pair<Int, String>>()
+        lines.forEachIndexed { i, raw ->
+            val code = raw.substringBefore("//")
+            if (openDepths.isNotEmpty() && funDepths.isEmpty() && bareReturn.containsMatchIn(code)) {
+                out += (i + 1) to raw.trim()
+            }
+            val before = depth
+            depth += code.count { it == '{' } - code.count { it == '}' }
+            if (code.contains('{')) {
+                // `before > 0` is what tells a LOCAL helper from the composable's own declaration.
+                // Without it the outer `fun Foo() {` matched too, which left a function scope open
+                // for the whole file and quietly disabled this guard everywhere - it reported a
+                // clean tree by scanning nothing. The proving case below is the only reason that
+                // was caught.
+                if (before > 0 && localFun.containsMatchIn(code)) funDepths.addLast(before)
+                else if (opensLambda.containsMatchIn(code)) openDepths.addLast(before)
+            }
+            while (funDepths.isNotEmpty() && depth <= funDepths.last()) funDepths.removeLast()
+            while (openDepths.isNotEmpty() && depth <= openDepths.last()) openDepths.removeLast()
+        }
+        return out
+    }
+
+    @Test fun `a return from a local helper function is left alone`() {
+        // The shape that made this guard fail on correct code the first time it ran: a local fun
+        // declared inside a composable, inside a layout. Its return is its own.
+        val sample = listOf(
+            "@Composable fun Fine() {",
+            "    Box {",
+            "        fun easedAt(t: Float): Float {",
+            "            return t * t",
+            "        }",
+            "        Text(\"\${easedAt(1f)}\")",
+            "    }",
+            "}"
+        )
+        assertTrue("a local fun's return is not a non-local return", scanBareReturns(sample).isEmpty())
+    }
+
+    @Test fun `the unlabelled guard catches a bare return inside a Column`() {
+        // Same discipline as the labelled guard: a guard nobody has seen fail is a guard nobody
+        // knows works.
+        val sample = listOf(
+            "@Composable fun Bad() {",
+            "    Column {",
+            "        if (x) return",
+            "        Text(\"hi\")",
+            "    }",
+            "}"
+        )
+        assertTrue("must flag the bare return", scanBareReturns(sample).size == 1)
+    }
+
+    @Test fun `a guard clause at the top of a composable is left alone`() {
+        // The safe and extremely common shape - ConnectionQualityDot, ReconnectingOverlay and
+        // several others all do this today. Flagging it would make the guard unusable.
+        val sample = listOf(
+            "@Composable fun Fine(ageMs: Long?) {",
+            "    if (ageMs == null) return",
+            "    Box {",
+            "        Text(\"hi\")",
+            "    }",
+            "}"
+        )
+        assertTrue("must not flag a top-level guard clause", scanBareReturns(sample).isEmpty())
+    }
+
     @Test fun `the guard would catch the line that actually crashed the app`() {
         // A guard nobody has seen fail is a guard nobody knows works. This is the exact text that
         // was in SwapPickerOverlay.
