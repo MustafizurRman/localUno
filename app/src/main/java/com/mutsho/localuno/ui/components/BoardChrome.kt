@@ -60,7 +60,10 @@ fun BoardTopBar(
     subLabel: String,
     logOpen: Boolean,
     onToggleLog: () -> Unit,
-    onRequestLeave: () -> Unit
+    onRequestLeave: () -> Unit,
+    /** Opens the rules-in-force sheet. The chip is the natural place for it - it already names the
+     *  mode, and "what does this mode mean" is the question it was raising and not answering. */
+    onShowRules: () -> Unit = {}
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -79,9 +82,17 @@ fun BoardTopBar(
                 .clip(RoundedCornerShape(6.dp))
                 .background(chipBg)
                 .border(1.dp, chipEdge, RoundedCornerShape(6.dp))
+                .clickable { onShowRules() }
                 .padding(horizontal = 10.dp, vertical = 3.dp)
         ) {
-            Text(chipLabel, color = chipFg, fontSize = 11.sp, letterSpacing = 1.4.sp)
+            // The trailing dot is the whole affordance. A full "?" badge was too loud for a strip
+            // this size, and an unmarked chip gives nobody a reason to try tapping it.
+            Text(
+                "$chipLabel ·",
+                color = chipFg,
+                fontSize = 11.sp,
+                letterSpacing = 1.4.sp
+            )
         }
         Text(
             subLabel,
@@ -129,7 +140,6 @@ private fun BoardIconButton(
 @Composable
 fun MoveLogStrip(
     log: List<MoveLogEntry>,
-    logOpen: Boolean,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.padding(horizontal = 14.dp)) {
@@ -157,7 +167,7 @@ fun MoveLogStrip(
                 overflow = TextOverflow.Ellipsis
             )
         }
-        if (logOpen) {
+        run {
             Column(
                 verticalArrangement = Arrangement.spacedBy(5.dp),
                 modifier = Modifier

@@ -14,6 +14,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -120,6 +122,17 @@ fun BoardScaffold(
         )
     }
 
+    // Deliberately hoisted out of BoardTopBar so the dialog is a sibling of the board rather than a
+    // child of a Row inside it - a dialog composed inside that strip inherits its layout constraints
+    // for measurement purposes and is a surprising place for one to live.
+    var showRules by remember { mutableStateOf(false) }
+    if (showRules) {
+        RulesInForceDialog(
+            settings = gameState.settings,
+            onDismiss = { showRules = false }
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -133,10 +146,18 @@ fun BoardScaffold(
             subLabel = "${gameState.players.count { it.isConnected }} playing · ${gameState.drawPile.size} in deck",
             logOpen = logOpen,
             onToggleLog = onToggleLog,
-            onRequestLeave = onRequestLeave
+            onRequestLeave = onRequestLeave,
+            onShowRules = { showRules = true }
         )
 
-        MoveLogStrip(log = moveLog, logOpen = logOpen)
+        // Closed by default. The strip used to sit here permanently, spending a band of the screen
+        // on one line of text that is only ever interesting for a second after it changes - and
+        // taking that band from the felt, which is the part of the board people actually watch.
+        // The list button in the top bar already toggles the history; it now toggles the whole
+        // thing, so the last move is one tap away and costs nothing while nobody wants it.
+        if (logOpen) {
+            MoveLogStrip(log = moveLog)
+        }
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) { felt() }
 
@@ -151,7 +172,10 @@ fun BoardScaffold(
                 isSpectating -> "You're out — watching the rest"
                 gameState.phase == GamePhase.PAUSED_DISCONNECT -> "Paused — waiting for a player"
                 gameState.pendingDrawCount > 0 && isMyTurn -> "Stack it or take +${gameState.pendingDrawCount}"
-                isMyTurn && !hasPlays -> "Nothing playable"
+                // Says what to DO, not just what is true. "Nothing playable" describes the
+                // situation and leaves the player to work out that the deck is the way out of it -
+                // which is obvious only if you already know this board.
+                isMyTurn && !hasPlays -> "Nothing playable — tap the deck to draw"
                 // The dial replaced drag-to-play: only the card under the needle is playable, and a
                 // tap anywhere else spins rather than plays. Copy that still said "drag a card up"
                 // would be describing an interaction the board no longer has.
@@ -250,19 +274,36 @@ fun DrawPile(
                 // whose eyes are on their own hand rather than the middle of the table.
                 Box(
                     modifier = Modifier
-                        .size(width = width + 34.dp, height = height + 34.dp)
+                        .size(width = width + 64.dp, height = height + 64.dp)
                         .drawBehind {
+                            // Reach and brightness both raised: at the old 34dp/0.34 the halo
+                            // stopped just past the card edge and read as part of the card art
+                            // rather than as something asking to be touched.
                             drawRoundRect(
                                 brush = Brush.radialGradient(
                                     colors = listOf(
-                                        UnoYellow.copy(alpha = 0.34f * (0.35f + pulse.value)),
+                                        UnoYellow.copy(alpha = 0.55f * (0.45f + pulse.value)),
                                         Color.Transparent
                                     ),
                                     center = Offset(size.width / 2f, size.height / 2f),
-                                    radius = size.minDimension * 0.85f
+                                    radius = size.minDimension * 0.95f
                                 ),
                                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(
-                                    24.dp.toPx(), 24.dp.toPx()
+                                    30.dp.toPx(), 30.dp.toPx()
+                                )
+                            )
+                            // A hard ring on the card itself. The halo alone is soft enough to be
+                            // missed on a bright screen; an edge is not.
+                            val inset = 32.dp.toPx()
+                            drawRoundRect(
+                                color = UnoYellow.copy(alpha = 0.5f + 0.5f * pulse.value),
+                                topLeft = Offset(inset, inset),
+                                size = Size(size.width - inset * 2f, size.height - inset * 2f),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                                    10.dp.toPx(), 10.dp.toPx()
+                                ),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                    width = 2.5f.dp.toPx()
                                 )
                             )
                         }
@@ -282,13 +323,20 @@ fun DrawPile(
         }
 
         if (mustDraw) {
+            // A filled pill rather than loose yellow text on felt. The caption sits over a busy,
+            // variably-lit background, and at 9.5sp with no ground behind it the one instruction
+            // on the screen was the least legible thing on it.
             Text(
                 "TAP TO DRAW",
-                color = UnoYellow,
-                fontSize = 9.5.sp,
+                color = Color(0xFF1A1400),
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 0.8.sp,
-                modifier = Modifier.graphicsLayer { alpha = 0.65f + 0.35f * pulse.value }
+                letterSpacing = 0.9.sp,
+                modifier = Modifier
+                    .graphicsLayer { alpha = 0.8f + 0.2f * pulse.value }
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(UnoYellow)
+                    .padding(horizontal = 9.dp, vertical = 4.dp)
             )
         }
         Text(caption, color = Neutral500, fontSize = 9.sp)

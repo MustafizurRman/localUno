@@ -26,6 +26,7 @@ import com.mutsho.localuno.R
 import com.mutsho.localuno.model.GameMode
 import com.mutsho.localuno.model.GameRules
 import com.mutsho.localuno.model.GameSettings
+import com.mutsho.localuno.model.HouseRule
 import com.mutsho.localuno.model.TimeoutAction
 import com.mutsho.localuno.ui.components.MenuSwitch
 import com.mutsho.localuno.ui.theme.*
@@ -103,31 +104,41 @@ private val DECK_ROWS = listOf(
     DeckRow(GameMode.FLIP, "Flip", "112 cards", R.drawable.ic_badge_flip)
 )
 
+/**
+ * The setup screen's view of a house rule: the shared name and description, plus the two notes only
+ * this screen shows (what switching it on or off actually changes).
+ *
+ * [name] and [desc] deliberately come from [HouseRule] rather than being written again here. They
+ * used to be local strings, which meant the same rule could be - and now is - described on three
+ * screens, and nothing kept those descriptions honest with each other.
+ */
 private data class CustomRule(
-    val name: String,
-    val desc: String,
+    val rule: HouseRule,
     val noteOn: String,
     val noteOff: String
-)
+) {
+    val name: String get() = rule.label
+    val desc: String get() = rule.detail
+}
 
 private val CUSTOM_RULES = listOf(
     CustomRule(
-        "Stacking", "Pass a draw penalty on — but only with the same card.",
+        HouseRule.STACKING,
         "+2 answers +2, +4 answers +4, reverse +4 answers reverse +4 · +6 and +10 can never be stacked",
         "Whoever is hit draws immediately"
     ),
     CustomRule(
-        "Last card must be a number", "You cannot win on Skip, Reverse, Wild or a draw card.",
+        HouseRule.LAST_CARD_NUMBER,
         "Any card that would win is locked unless it's a number",
         "Any card can win"
     ),
     CustomRule(
-        "Zero rotates hands", "Play a 0 and every hand shifts one seat in play direction.",
+        HouseRule.ZERO_ROTATES,
         "Active for all seats",
         "0 plays as a normal number"
     ),
     CustomRule(
-        "Seven swaps hands", "Play a 7 and choose whose hand you take.",
+        HouseRule.SEVEN_SWAPS,
         "You pick the seat you trade with",
         "7 plays as a normal number"
     )

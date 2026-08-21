@@ -148,6 +148,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     val emojiEvent: SharedFlow<NetworkMessage.EmojiReaction> = _emojiEvent
 
     /**
+     * What the table just did to the local player - see [detectTableEvents].
+     *
+     * One flow for the whole category rather than one per event, because every consumer so far
+     * wants all of them and would otherwise have to collect three flows to answer one question
+     * ("did something just happen to me?"). Buffered at 4: a single transition can legitimately
+     * produce more than one event, and dropping the second would drop exactly the compound moment
+     * worth reporting.
+     */
+    private val _tableEvent = MutableSharedFlow<TableEvent>(extraBufferCapacity = 4)
+    val tableEvent: SharedFlow<TableEvent> = _tableEvent
+
+    /**
      * Why this match ended for a client without a winner - the host quit, or the link to them died.
      * Null while the match is live.
      *
@@ -759,6 +771,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         dismissStaleColorPicker(stamped)
         emitMercyKnockouts(prevState, stamped)
         emitUnoCalls(prevState, stamped)
+        emitTableEvents(prevState, stamped)
         applyMoveLog(prevState, stamped)
 
         // Always broadcast the new state, INCLUDING the round-ending one. Previously a ROUND_OVER
@@ -917,6 +930,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
      * to 1 connected player - while still excluding disconnect-driven knockouts, which transition
      * from PAUSED_DISCONNECT and would never have had prevState.phase == PLAYING.
      */
+    /**
+     * Reports what the table just did to the local player.
+     *
+     * Runs on the host funnel and the client's StateUpdate handler alike, over the same two states,
+     * so a guest and the host feel the same thing at the same moment. All of the judgement lives in
+     * [detectTableEvents], which is pure and tested; this only carries the result out.
+     */
+    private fun emitTableEvents(prevState: GameState, newState: GameState) {
+        val me = _localPlayerId.value
+        detectTableEvents(prevState, newState, me).forEach { event ->
+            viewModelScope.launch { _tableEvent.emit(event) }
+        }
+    }
+
     private fun emitMercyKnockouts(prevState: GameState, newState: GameState) {
         if (prevState.phase != GamePhase.PLAYING) return
         if (newState.phase != GamePhase.PLAYING && newState.phase != GamePhase.ROUND_OVER) return
@@ -1123,6 +1150,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 dismissStaleColorPicker(newState)
                 emitMercyKnockouts(currentState, newState)
                 emitUnoCalls(currentState, newState)
+                emitTableEvents(currentState, newState)
                 applyMoveLog(currentState, newState)
             }
             is NetworkMessage.GameOver -> {

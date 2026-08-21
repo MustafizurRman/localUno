@@ -8,6 +8,8 @@ import android.os.VibratorManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import com.mutsho.localuno.model.TableEvent
+import com.mutsho.localuno.model.detectTableEvents
 
 /**
  * The "it's your turn now" cue.
@@ -44,6 +46,48 @@ fun rememberTurnAlert(): () -> Unit {
                         -1 // no repeat
                     )
                 )
+            }
+        }
+    }
+}
+
+/**
+ * The rest of the vocabulary: what the table did to you.
+ *
+ * Three shapes, chosen to be told apart through a pocket rather than to be pleasant:
+ *
+ *  - **Hit** - one firm pulse. Something landed on you (a draw stack, a hand you did not ask for).
+ *    Shorter and harder than the turn cue's "ba-dum", because it reports a fact rather than asking
+ *    for a decision.
+ *  - **Alarm** - three rising pulses. You are out. It is the only pattern that escalates, and it is
+ *    reserved for the only event that ends your involvement in the round.
+ *
+ * Nothing here fires for an action you took. See [detectTableEvents] for how that is guaranteed.
+ */
+private val HIT_TIMINGS = longArrayOf(0, 70)
+private val HIT_AMPLITUDES = intArrayOf(0, 255)
+
+private val ALARM_TIMINGS = longArrayOf(0, 55, 70, 55, 70, 90)
+private val ALARM_AMPLITUDES = intArrayOf(0, 140, 0, 190, 0, 255)
+
+/**
+ * Returns a callback that plays the right pattern for a [TableEvent], or a no-op on a device with
+ * no vibrator. Callers gate on the user's haptics preference; this does not check it, so that the
+ * decision lives in one place rather than being re-made at every call site.
+ */
+@Composable
+fun rememberTableHaptics(): (TableEvent) -> Unit {
+    val context = LocalContext.current
+    val vibrator = remember(context) { resolveVibrator(context) }
+    return remember(vibrator) {
+        { event ->
+            if (vibrator != null && vibrator.hasVibrator()) {
+                val (timings, amplitudes) = when (event) {
+                    is TableEvent.StackLanded -> HIT_TIMINGS to HIT_AMPLITUDES
+                    TableEvent.HandHit -> HIT_TIMINGS to HIT_AMPLITUDES
+                    TableEvent.KnockedOut -> ALARM_TIMINGS to ALARM_AMPLITUDES
+                }
+                vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
             }
         }
     }

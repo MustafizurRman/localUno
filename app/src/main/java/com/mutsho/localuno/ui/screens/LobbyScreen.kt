@@ -36,6 +36,7 @@ import com.mutsho.localuno.model.GameSettings
 import com.mutsho.localuno.model.PlayerInfo
 import com.mutsho.localuno.network.JoinLink
 import com.mutsho.localuno.ui.components.QrCode
+import com.mutsho.localuno.ui.components.RulesInForce
 import com.mutsho.localuno.ui.theme.*
 
 @Composable
@@ -49,11 +50,13 @@ fun LobbyScreen(
     onClearError: () -> Unit = {},
     hostAddress: String? = null,
     onAddBot: () -> Unit = {},
-    onRemoveBot: (String) -> Unit = {}
+    onRemovePlayer: (String) -> Unit = {}
 ) {
     // Leaving as host with others already present destroys the lobby for everyone - confirm first.
     var showLeaveConfirm by remember { mutableStateOf(false) }
     var showQr by remember { mutableStateOf(false) }
+    // The person the host is about to remove, held while they confirm. Null when nothing is pending.
+    var removeTarget by remember { mutableStateOf<PlayerInfo?>(null) }
     val requestLeave = {
         if (isHost && players.size > 1) showLeaveConfirm = true else onLeave()
     }
@@ -111,6 +114,34 @@ fun LobbyScreen(
                 containerColor = NocturneSurface
             )
         }
+    }
+
+    removeTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { removeTarget = null },
+            title = { Text("Remove ${target.name}?", color = Color.White) },
+            text = {
+                Text(
+                    // Says what actually happens, including the part that is not obvious: they
+                    // cannot simply rejoin. Knowing the PIN is no longer enough for them.
+                    "They'll be told the host removed them and sent back to the menu. " +
+                        "They won't be able to rejoin this table.",
+                    color = Color.White.copy(alpha = 0.75f)
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onRemovePlayer(target.id)
+                    removeTarget = null
+                }) { Text("Remove", color = UnoRed) }
+            },
+            dismissButton = {
+                TextButton(onClick = { removeTarget = null }) {
+                    Text("Cancel", color = Color.White)
+                }
+            },
+            containerColor = NocturneSurface
+        )
     }
 
     if (showLeaveConfirm) {
@@ -247,9 +278,15 @@ fun LobbyScreen(
                 items(players) { player ->
                     PlayerRow(
                         player = player,
-                        // Only the host runs bots, and only before the round starts.
-                        onRemoveBot = if (isHost && player.isBot) {
-                            { onRemoveBot(player.id) }
+                        // The host can free any seat but their own - leaving is a separate control
+                        // that means something else entirely. Removing a bot is instant and
+                        // trivially undone by tapping an empty slot; removing a person is neither,
+                        // so that one asks first.
+                        onRemove = if (isHost && !player.isHost) {
+                            {
+                                if (player.isBot) onRemovePlayer(player.id)
+                                else removeTarget = player
+                            }
                         } else null
                     )
                 }
@@ -260,6 +297,15 @@ fun LobbyScreen(
                 val emptySlots = settings.maxPlayers - players.size
                 items(emptySlots) {
                     EmptySlotRow(onAddBot = if (isHost) onAddBot else null)
+                }
+
+                // What this table actually plays like. A guest picked none of it and, until now,
+                // was never shown any of it - they tapped a lobby name and found out mid-round.
+                // Inside the scrolling list rather than pinned above START so a full table on a
+                // short screen pushes it out of the way instead of squeezing the seats.
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    RulesInForce(settings = settings)
                 }
             }
 
@@ -319,7 +365,7 @@ fun LobbyScreen(
 }
 
 @Composable
-private fun PlayerRow(player: PlayerInfo, onRemoveBot: (() -> Unit)? = null) {
+private fun PlayerRow(player: PlayerInfo, onRemove: (() -> Unit)? = null) {
     val avatarColor = AvatarColors.getOrElse(player.avatarColor % AvatarColors.size) { AvatarColors[0] }
 
     Surface(
@@ -378,17 +424,6 @@ private fun PlayerRow(player: PlayerInfo, onRemoveBot: (() -> Unit)? = null) {
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                     )
                 }
-                if (onRemoveBot != null) {
-                    Spacer(modifier = Modifier.width(4.dp))
-                    IconButton(onClick = onRemoveBot, modifier = Modifier.size(28.dp)) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = "Remove ${player.name}",
-                            tint = Color.White.copy(alpha = 0.55f),
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
             }
 
             // Host badge
@@ -419,6 +454,20 @@ private fun PlayerRow(player: PlayerInfo, onRemoveBot: (() -> Unit)? = null) {
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            // Last in the row, after every badge, so it sits in the same place on every seat it
+            // appears on. Only the host ever sees one, and never on their own row.
+            if (onRemove != null) {
+                Spacer(modifier = Modifier.width(4.dp))
+                IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Remove ${player.name}",
+                        tint = Color.White.copy(alpha = 0.55f),
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }

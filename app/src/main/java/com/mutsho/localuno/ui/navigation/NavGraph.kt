@@ -1,8 +1,13 @@
 package com.mutsho.localuno.ui.navigation
 
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import com.mutsho.localuno.ui.theme.NocturneSurface
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -10,6 +15,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.mutsho.localuno.model.GameSettings
 import com.mutsho.localuno.ui.components.LocalCardSkin
+import com.mutsho.localuno.ui.components.rememberTableHaptics
 import com.mutsho.localuno.ui.screens.*
 import kotlinx.coroutines.delay
 import com.mutsho.localuno.viewmodel.GameViewModel
@@ -38,6 +44,32 @@ fun AppNavigation() {
     // dial, the discard pile, the seat rails, the card gallery and the settings preview, and none
     // of those wants a skin parameter it does nothing with but forward.
     val cardSkin by mainViewModel.cardSkin.collectAsState()
+
+    // Deliberately above the NavHost, not inside the lobby route.
+    //
+    // Being removed navigates the guest off that route, and a dialog composed inside it leaves the
+    // composition with it - so the one thing that explains why they were just thrown back to the
+    // menu would flash and disappear. Held here, it outlives the navigation.
+    var removedReason by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        lobbyViewModel.removedFromTable.collect { reason ->
+            removedReason = reason
+            navController.popBackStack(Routes.MAIN_MENU, inclusive = false)
+        }
+    }
+    removedReason?.let { reason ->
+        AlertDialog(
+            onDismissRequest = { removedReason = null },
+            title = { Text("Removed from the table", color = Color.White) },
+            text = { Text(reason, color = Color.White.copy(alpha = 0.75f)) },
+            confirmButton = {
+                TextButton(onClick = { removedReason = null }) {
+                    Text("OK", color = Color.White)
+                }
+            },
+            containerColor = NocturneSurface
+        )
+    }
 
     CompositionLocalProvider(LocalCardSkin provides cardSkin) {
     NavHost(navController = navController, startDestination = Routes.MAIN_MENU) {
@@ -204,7 +236,7 @@ fun AppNavigation() {
                 onClearError = { lobbyViewModel.clearError() },
                 hostAddress = hostAddress,
                 onAddBot = { lobbyViewModel.addBot() },
-                onRemoveBot = { lobbyViewModel.removeBot(it) }
+                onRemovePlayer = { lobbyViewModel.removePlayer(it) }
             )
         }
 
@@ -283,6 +315,15 @@ fun AppNavigation() {
             val keepHandSorted by mainViewModel.keepHandSorted.collectAsState()
             val reconnecting by gameViewModel.reconnecting.collectAsState()
             val reconnectAttempt by gameViewModel.reconnectAttemptNumber.collectAsState()
+
+            // What the table just did to you, felt rather than read. Gated on the same haptics
+            // preference as the play/draw feedback, because it is the same channel - but unlike
+            // that feedback it fires for things you did NOT do, which is the whole point of it.
+            val tableHaptics = rememberTableHaptics()
+            LaunchedEffect(hapticsEnabled) {
+                if (!hapticsEnabled) return@LaunchedEffect
+                gameViewModel.tableEvent.collect { event -> tableHaptics(event) }
+            }
 
             // UNO announcement ? auto-dismiss after 2.5 seconds
             var unoAnnouncement by remember { mutableStateOf<String?>(null) }
