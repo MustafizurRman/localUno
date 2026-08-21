@@ -703,3 +703,4 @@ fun cardDisplayName(card: Card): String {
     }
     return if (colour.isEmpty()) name else "$colour $name"
 }
+

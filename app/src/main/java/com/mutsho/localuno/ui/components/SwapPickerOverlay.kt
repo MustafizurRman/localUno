@@ -66,6 +66,23 @@ fun SwapPickerOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // if/else, NOT an early `return@Column`.
+            //
+            // Column is an inline composable, so returning out of its content lambda is a non-local
+            // return: it jumps past the compiler-generated end-group calls for every group it
+            // unwinds. The composition then carries more group ends than starts, and Compose does
+            // not fail where that happened - it fails on a LATER frame, popping an empty group
+            // stack in endRoot, with not one line of application code on the trace.
+            //
+            // That was this app's intermittent killer. It only fires on this branch, which needs
+            // somebody ELSE to play a 7 with seven-swaps on - so it looked random, survived every
+            // reading of the stack, and outlived a Compose runtime bump, a dozen overlay bisects
+            // and two claims that it had been ruled out. The seed log recorded in the crash report
+            // is what finally placed it: the captured round replays to CHOOSING_SWAP with a bot as
+            // the chooser, which is precisely and only when this line ran.
+            //
+            // Never early-return from a composable lambda. It reads as ordinary Kotlin and it is
+            // not.
             if (!isChooser) {
                 Text(
                     "SWAPPING HANDS",
@@ -79,90 +96,89 @@ fun SwapPickerOverlay(
                     color = Neutral500,
                     fontSize = 11.sp
                 )
-                return@Column
-            }
+            } else {
+                Text(
+                    "SWAP HANDS WITH",
+                    color = NocturneText,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp
+                )
+                Text(
+                    "Your 7 is played — pick a seat",
+                    color = Neutral500,
+                    fontSize = 11.sp,
+                    modifier = Modifier.offset(y = (-8).dp)
+                )
 
-            Text(
-                "SWAP HANDS WITH",
-                color = NocturneText,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.5.sp
-            )
-            Text(
-                "Your 7 is played — pick a seat",
-                color = Neutral500,
-                fontSize = 11.sp,
-                modifier = Modifier.offset(y = (-8).dp)
-            )
-
-            if (turnTimeoutSeconds != null && turnStartedAtMillis > 0L) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.offset(y = (-4).dp)
-                ) {
-                    TurnTimerText(
-                        turnStartedAtMillis = turnStartedAtMillis,
-                        totalSeconds = turnTimeoutSeconds
-                    )
-                    Text(
-                        "before the biggest hand is picked for you",
-                        color = Neutral500,
-                        fontSize = 10.sp
-                    )
-                }
-            }
-
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth().widthIn(max = 250.dp)
-            ) {
-                candidates.forEach { seat ->
-                    val avatar = AvatarColors.getOrElse(seat.avatarColor % AvatarColors.size) { AvatarColors[0] }
+                if (turnTimeoutSeconds != null && turnStartedAtMillis > 0L) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(11.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .border(1.dp, Neutral800, RoundedCornerShape(14.dp))
-                            .clickable { onPick(seat.id) }
-                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.offset(y = (-4).dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(Brush.linearGradient(listOf(avatar, avatar.copy(alpha = 0.72f)))),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                seat.name.take(1).uppercase().ifEmpty { "?" },
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(seat.name, color = NocturneText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                text = when {
-                                    seat.cardCount == 1 -> "one card away from winning"
-                                    seat.cardCount <= 3 -> "running low — good target"
-                                    else -> "holding ${seat.cardCount}"
-                                },
-                                color = Accent300,
-                                fontSize = 9.5.sp
-                            )
-                        }
-                        Text(
-                            "${seat.cardCount}",
-                            color = NocturneText,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
+                        TurnTimerText(
+                            turnStartedAtMillis = turnStartedAtMillis,
+                            totalSeconds = turnTimeoutSeconds
                         )
+                        Text(
+                            "before the biggest hand is picked for you",
+                            color = Neutral500,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 250.dp)
+                ) {
+                    candidates.forEach { seat ->
+                        val avatar = AvatarColors.getOrElse(seat.avatarColor % AvatarColors.size) { AvatarColors[0] }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(11.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .border(1.dp, Neutral800, RoundedCornerShape(14.dp))
+                                .clickable { onPick(seat.id) }
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(Brush.linearGradient(listOf(avatar, avatar.copy(alpha = 0.72f)))),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    seat.name.take(1).uppercase().ifEmpty { "?" },
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(seat.name, color = NocturneText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = when {
+                                        seat.cardCount == 1 -> "one card away from winning"
+                                        seat.cardCount <= 3 -> "running low — good target"
+                                        else -> "holding ${seat.cardCount}"
+                                    },
+                                    color = Accent300,
+                                    fontSize = 9.5.sp
+                                )
+                            }
+                            Text(
+                                "${seat.cardCount}",
+                                color = NocturneText,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
             }
