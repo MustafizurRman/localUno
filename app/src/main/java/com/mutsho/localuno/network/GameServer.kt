@@ -17,7 +17,27 @@ class GameServer {
 
     companion object {
         private const val TAG = "GameServer"
+
+        /**
+         * Sockets accepted at once, beyond which new ones are closed immediately.
+         *
+         * The accept loop used to take everything offered, and each connection costs a coroutine, a
+         * reader, a writer and a ping job - none of which requires ever joining successfully. So a
+         * peer that never sends a valid message could still flood the table off the air.
+         *
+         * Set generously against the seat count: reconnects briefly hold two sockets for one
+         * player, and a rejected joiner's socket lingers until it is closed.
+         */
+        private const val CONNECTION_HEADROOM = 6
     }
+
+    /**
+     * Seats at this table, used with [CONNECTION_HEADROOM] to cap concurrent sockets. Set by the
+     * host when the lobby is created; the default is the largest table the app offers, so a caller
+     * that forgets is merely un-tightened rather than broken.
+     */
+    @Volatile
+    var maxPlayers: Int = 8
 
     private var serverSocket: ServerSocket? = null
     private val clients = ConcurrentHashMap<String, ClientConnection>()
@@ -76,6 +96,12 @@ class GameServer {
             while (isActive) {
                 try {
                     val clientSocket = serverSocket?.accept() ?: break
+                    // Refused at the door, before any coroutine or buffer is spent on it.
+                    if (clients.size >= maxPlayers + CONNECTION_HEADROOM) {
+                        Log.w(TAG, "Refusing connection - ${clients.size} already open")
+                        try { clientSocket.close() } catch (_: Exception) {}
+                        continue
+                    }
                     handleNewClient(clientSocket)
                 } catch (e: java.net.SocketException) {
                     break  // server socket was closed intentionally
@@ -127,22 +153,34 @@ class GameServer {
 
                 // Read messages from client
                 while (isActive && !socket.isClosed) {
-                    val line = reader.readLine() ?: break
+                    val line = reader.readBoundedLine() ?: break
                     val message = MessageSerializer.deserialize(line)
                     if (message != null) {
-                        // Update playerId on join request
-                        if (message is NetworkMessage.JoinRequest) {
-                            finalPlayerId = message.playerId
-                            connection.playerId = message.playerId
-                            clients.remove(clientId)
-                            clients[message.playerId] = connection
-                        }
+                        // A JoinRequest no longer rebinds anything here.
+                        //
+                        // It used to, unconditionally and before a single check had run: the
+                        // connection took whatever playerId the payload claimed and replaced that
+                        // key in `clients`. Since private hands are addressed through this map -
+                        // broadcastStateToAll sends each player their own cards by id - anyone who
+                        // could reach the port could claim a seated player's id and start receiving
+                        // that player's hand, while the real player went dark and was eventually
+                        // declared disconnected. The claimed id was public too: every LobbyUpdate
+                        // carries a PlayerInfo, with its id, for every seat.
+                        //
+                        // The identity is now a claim carried in the payload, and only the
+                        // application can turn it into an identity - see bindPlayerId, called after
+                        // the PIN has been checked and the join accepted.
                         _messages.emit(Pair(connection.playerId, message))
                     }
                 }
             } catch (e: java.net.SocketTimeoutException) {
                 // No data - not even a heartbeat - within READ_TIMEOUT_MS. The peer is gone.
                 Log.i(TAG, "Connection timed out - no heartbeat from $clientId")
+            } catch (e: LineTooLongException) {
+                // Framing is already lost, so there is nothing to resynchronise to. Dropping the
+                // connection is the whole defence: the alternative is letting one peer decide how
+                // much memory the host allocates.
+                Log.w(TAG, "Dropping $clientId - ${e.message}")
             } catch (e: Exception) {
                 Log.e(TAG, "Client error: $clientId", e)
             } finally {
@@ -153,6 +191,11 @@ class GameServer {
                 // is actually online) and fire a bogus Disconnected that knocks them out mid-game.
                 val conn = connection
                 if (conn != null) {
+                    // Read from the connection rather than a local copy: bindPlayerId is what
+                    // moves an identity now, and it updates the connection. A stale local would
+                    // leave the map holding a dead entry under the player's id - which the next
+                    // reconnect would then be refused for colliding with.
+                    finalPlayerId = conn.playerId
                     clients.remove(clientId, conn)
                     val removedOwn = clients.remove(finalPlayerId, conn)
                     try { socket.close() } catch (_: Exception) {}
@@ -182,6 +225,47 @@ class GameServer {
         } catch (e: Exception) {
             Log.e(TAG, "Error sending to ${connection.playerId}", e)
         }
+    }
+
+    /**
+     * Give a connection its player identity, once the application has decided it may have one.
+     *
+     * This is the authorised half of what the read loop used to do for free. Two rules:
+     *
+     *  - **A live connection already holding that id wins.** A genuine reconnect arrives on a
+     *    socket that is dead or gone; a second socket asking for an id that a healthy connection is
+     *    currently using is either a bug or somebody helping themselves to another player's hand.
+     *    A dead entry is replaced, because that IS the reconnect case.
+     *  - **Only the caller decides when.** The PIN, the roster and the engine's view of whether a
+     *    seat can be resumed all live above this class, so binding is something it is told to do,
+     *    never something it infers from traffic.
+     *
+     * @return true if the connection now owns [playerId].
+     */
+    fun bindPlayerId(clientId: String, playerId: String): Boolean {
+        val connection = clients[clientId] ?: return false
+        if (connection.playerId == playerId) return true
+
+        val existing = clients[playerId]
+        if (existing != null && existing !== connection) {
+            val stillAlive = !existing.socket.isClosed && existing.socket.isConnected
+            if (stillAlive) {
+                Log.w(TAG, "Refusing to bind $playerId - a live connection already holds it")
+                return false
+            }
+            clients.remove(playerId, existing)
+        }
+
+        clients.remove(clientId, connection)
+        connection.playerId = playerId
+        clients[playerId] = connection
+        return true
+    }
+
+    /** Whether a live connection currently holds this id. */
+    fun isPlayerIdLive(playerId: String): Boolean {
+        val c = clients[playerId] ?: return false
+        return !c.socket.isClosed && c.socket.isConnected
     }
 
     fun sendToClient(playerId: String, message: NetworkMessage) {

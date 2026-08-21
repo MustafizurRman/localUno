@@ -1,5 +1,6 @@
 package com.mutsho.localuno.ui.screens
 
+import java.security.SecureRandom
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -191,7 +192,11 @@ fun CustomTableScreen(
     // choice rather than abandoning it. Seats are common to all three and belong to none.
     fun edit(block: () -> Unit) = block()
 
-    val pin = rememberSaveable { (1000..9999).random().toString() }
+    // SecureRandom, not Kotlin's default Random, which is a seedable PRNG never intended to produce
+    // anything anyone has to guess. Still four digits: this is read aloud across a room, and the
+    // real defence against guessing is the attempt limiter in PinGate, not the length. A longer PIN
+    // would cost every honest guest and buy far less than rate limiting already does.
+    val pin = rememberSaveable { (SecureRandom().nextInt(9000) + 1000).toString() }
 
     Box(
         modifier = Modifier

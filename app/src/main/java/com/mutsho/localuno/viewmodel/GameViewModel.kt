@@ -79,6 +79,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private var gameEngine: GameEngine? = null
     private var gameServer: GameServer? = null
+
+    /**
+     * The lobby's PIN limiter, carried across so mid-match rejoins draw on the same allowance of
+     * guesses the lobby was using. Null for a client or a solo table, where nothing checks a PIN.
+     */
+    private var pinGate: PinGate? = null
     private var gameClient: GameClient? = null
 
     private val _gameState = MutableStateFlow(GameState())
@@ -263,7 +269,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         settings: GameSettings,
         players: List<PlayerInfo>,
         localPlayerId: String,
-        server: GameServer?
+        server: GameServer?,
+        /** Shared with the lobby so the round starting does not reset an attacker's guess count. */
+        pinGate: PinGate? = null
     ) {
         // Clear any leftover end-of-round state before the new round. Critical for rematches: the
         // GAME screen navigates to END whenever gameOver is true, so starting a round with a stale
@@ -272,6 +280,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _isHost.value = true
         _localPlayerId.value = localPlayerId
         gameServer = server
+        this.pinGate = pinGate
 
         // Carry isConnected across. Player.isConnected defaults to true, so dropping it here turned
         // anyone who disconnected in the lobby into a live player in the engine: dealt a hand, never
@@ -670,9 +679,39 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
      * currently waiting on - see GameEngine.reconnectPlayer for why a seat already knocked out
      * can't come back this way.
      */
-    private fun handleRejoinRequest(playerId: String) {
+    private fun handleRejoinRequest(clientId: String, request: NetworkMessage.JoinRequest) {
         if (!_isHost.value) return
         val engine = gameEngine ?: return
+        val playerId = request.playerId
+
+        // The PIN, which this path never checked at all.
+        //
+        // The lobby's handler bows out entirely once the round starts, so nothing was validating
+        // it on the one route that admits somebody mid-match. Narrow in practice - reconnectPlayer
+        // below still requires the table to be paused on this exact player's disconnect - but the
+        // PIN is the table's only access control and it was simply not consulted.
+        val expectedPin = _gameState.value.settings.pin
+        if (expectedPin != null) {
+            val verdict = pinGate?.check(clientId, request.pin, expectedPin, System.currentTimeMillis())
+            if (verdict != null && verdict !is PinGate.Verdict.Ok) {
+                gameServer?.sendThenDisconnect(
+                    clientId,
+                    NetworkMessage.JoinResponse(accepted = false, reason = "Invalid PIN")
+                )
+                return
+            }
+        }
+
+        // Refuse outright if a live connection still holds this seat: a genuine reconnect arrives
+        // on a dead socket, so anything else is somebody claiming a player who never left.
+        if (gameServer?.isPlayerIdLive(playerId) == true) {
+            gameServer?.sendThenDisconnect(
+                clientId,
+                NetworkMessage.JoinResponse(accepted = false, reason = "That player is already connected")
+            )
+            return
+        }
+
         val before = engine.getState().sequenceNumber
         val resumed = engine.reconnectPlayer(playerId)
         if (resumed.sequenceNumber == before) {
@@ -682,13 +721,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             // (knocked out, or their grace window already expired). Telling a first-time joiner
             // they "can't rejoin" describes something they never did.
             val wasInThisMatch = engine.getState().getPlayerById(playerId) != null
-            gameServer?.sendToClient(
-                playerId,
+            // Addressed by clientId - the connection has not been bound to the player id, and after
+            // a refusal it never will be.
+            gameServer?.sendThenDisconnect(
+                clientId,
                 NetworkMessage.JoinResponse(
                     accepted = false,
                     reason = if (wasInThisMatch) "Can't rejoin — your seat is gone"
                     else "Game already in progress"
                 )
+            )
+            return
+        }
+
+        // Accepted, so the claim finally becomes an identity.
+        if (gameServer?.bindPlayerId(clientId, playerId) != true) {
+            gameServer?.sendThenDisconnect(
+                clientId,
+                NetworkMessage.JoinResponse(accepted = false, reason = "That player is already connected")
             )
             return
         }
@@ -1084,7 +1134,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun handlePlayerMessage(playerId: String, message: NetworkMessage) {
         when (message) {
-            is NetworkMessage.JoinRequest -> handleRejoinRequest(playerId)
+            // playerId here is the SOCKET's identity, which for a rejoin is still the raw address -
+            // the claim lives in the payload and is not trusted until handleRejoinRequest binds it.
+            is NetworkMessage.JoinRequest -> handleRejoinRequest(playerId, message)
             is NetworkMessage.PlayCard -> {
                 // The play IS the end of any colour choice, whether or not the release arrives.
                 endColorPick(playerId)

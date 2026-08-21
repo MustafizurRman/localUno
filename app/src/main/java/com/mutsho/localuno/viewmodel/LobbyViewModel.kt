@@ -83,6 +83,12 @@ class LobbyViewModel(application: Application) : AndroidViewModel(application) {
      */
     private val removedPlayerIds = mutableSetOf<String>()
 
+    /**
+     * Rate limiter for PIN attempts against this table. Shared with GameViewModel's rejoin path via
+     * [pinGate] so an attacker cannot get a fresh allowance by waiting for the round to start.
+     */
+    private val pinGate = PinGate()
+
     private val _isHost = MutableStateFlow(false)
     val isHost: StateFlow<Boolean> = _isHost
 
@@ -156,6 +162,10 @@ class LobbyViewModel(application: Application) : AndroidViewModel(application) {
         // advertiseLobby now takes the server as a parameter rather than reading the field, so this
         // particular ordering mistake cannot be made again.
         val server = GameServer()
+        // Caps concurrent sockets - see GameServer.CONNECTION_HEADROOM. Set before start() so the
+        // accept loop is never briefly running with the default.
+        server.maxPlayers = settings.maxPlayers
+        pinGate.reset()
         val port = server.start()
         gameServer = server
         _hostAddress.value = getLocalIpAddress()?.let { "$it:$port" }
@@ -645,14 +655,33 @@ class LobbyViewModel(application: Application) : AndroidViewModel(application) {
                     return
                 }
 
-                // Validate PIN
+                // PIN, rate-limited and always followed by a disconnect when it fails.
+                //
+                // Both halves were missing. A rejection used to leave the socket open, so a client
+                // that simply declined to hang up - our own does, an attacker's would not - stayed
+                // connected, kept receiving every LobbyUpdate (which carries a PlayerInfo, with its
+                // id, for every seat at the table) and was free to guess again. Ten thousand
+                // four-digit possibilities over a LAN socket is a few seconds' work.
                 val settings = _settings.value
-                if (settings.pin != null && message.pin != settings.pin) {
-                    gameServer?.sendToClient(
-                        clientId,
-                        NetworkMessage.JoinResponse(accepted = false, reason = "Invalid PIN")
-                    )
-                    return
+                when (pinGate.check(clientId, message.pin, settings.pin, System.currentTimeMillis())) {
+                    is PinGate.Verdict.Ok -> Unit
+                    is PinGate.Verdict.Wrong -> {
+                        gameServer?.sendThenDisconnect(
+                            clientId,
+                            NetworkMessage.JoinResponse(accepted = false, reason = "Invalid PIN")
+                        )
+                        return
+                    }
+                    is PinGate.Verdict.LockedOut -> {
+                        gameServer?.sendThenDisconnect(
+                            clientId,
+                            NetworkMessage.JoinResponse(
+                                accepted = false,
+                                reason = "Too many wrong PINs — wait a minute and try again"
+                            )
+                        )
+                        return
+                    }
                 }
 
                 // The match is already underway. A JoinRequest arriving now is always a mid-round
@@ -682,6 +711,22 @@ class LobbyViewModel(application: Application) : AndroidViewModel(application) {
                     return
                 }
 
+                // Only now does the claimed id become this connection's identity. The transport no
+                // longer does this on its own - see GameServer.bindPlayerId - so a refusal here
+                // means a live connection already holds the id, i.e. somebody is trying to take a
+                // seated player's place rather than rejoin their own.
+                val bound = gameServer?.bindPlayerId(clientId, message.playerId) ?: false
+                if (!bound) {
+                    gameServer?.sendThenDisconnect(
+                        clientId,
+                        NetworkMessage.JoinResponse(
+                            accepted = false,
+                            reason = "That player is already connected"
+                        )
+                    )
+                    return
+                }
+
                 val newPlayer = PlayerInfo(
                     id = message.playerId,
                     name = message.playerName,
@@ -695,9 +740,9 @@ class LobbyViewModel(application: Application) : AndroidViewModel(application) {
                     _players.value + newPlayer
                 }
 
-                // Use clientId (socket key) to send response ? message.playerId not yet registered
+                // Addressed by playerId now that the bind above has registered it.
                 gameServer?.sendToClient(
-                    clientId,
+                    message.playerId,
                     NetworkMessage.JoinResponse(accepted = true, assignedId = message.playerId)
                 )
 
@@ -758,6 +803,15 @@ class LobbyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun getServer(): GameServer? = gameServer
     fun getClient(): GameClient? = gameClient
+
+    /**
+     * The table's PIN limiter, handed to GameViewModel when the match starts.
+     *
+     * Shared rather than duplicated so an attacker cannot get a fresh allowance of guesses simply
+     * by waiting for the round to begin - the lobby stops answering JoinRequests at that point and
+     * the rejoin path takes over.
+     */
+    fun getPinGate(): PinGate = pinGate
     fun clearError() { _error.value = null }
 
     override fun onCleared() {

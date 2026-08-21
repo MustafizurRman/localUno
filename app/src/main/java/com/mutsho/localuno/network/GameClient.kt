@@ -106,7 +106,11 @@ class GameClient {
             scope.launch {
                 try {
                     while (isActive && socket?.isClosed == false) {
-                        val line = reader?.readLine() ?: break
+                        // Bounded for the same reason the server's read is - the attack works in
+                        // this direction too. A malicious or broken host that streams bytes with no
+                        // newline would otherwise grow this reader's buffer until the guest's app
+                        // dies, and a guest has even less reason than a host to trust what arrives.
+                        val line = reader?.readBoundedLine() ?: break
                         _lastMessageAt.value = System.currentTimeMillis()
                         val message = MessageSerializer.deserialize(line)
                         if (message != null) {
@@ -116,6 +120,8 @@ class GameClient {
                 } catch (e: java.net.SocketTimeoutException) {
                     // No data - not even a heartbeat - within READ_TIMEOUT_MS. The peer is gone.
                     Log.i(TAG, "Connection timed out - no heartbeat from host")
+                } catch (e: LineTooLongException) {
+                    Log.w(TAG, "Dropping host connection - ${e.message}")
                 } catch (e: java.net.SocketException) {
                     // Expected when host closes the game ? not an error
                     Log.i(TAG, "Socket closed: ${e.message}")

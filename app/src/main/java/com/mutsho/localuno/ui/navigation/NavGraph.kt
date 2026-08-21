@@ -205,7 +205,8 @@ fun AppNavigation() {
                             settings = settings,
                             players = players,
                             localPlayerId = mainViewModel.playerId.value,
-                            server = server
+                            server = server,
+                            pinGate = lobbyViewModel.getPinGate()
                         )
                     } else {
                         val client = lobbyViewModel.getClient() ?: return@LaunchedEffect

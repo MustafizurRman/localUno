@@ -54,6 +54,17 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+    testOptions {
+        unitTests {
+            // GameServer and GameClient are otherwise ordinary JVM socket code - the only Android
+            // in them is android.util.Log, whose stubs throw "not mocked" by default and take the
+            // whole class down with them. Returning defaults instead lets the transport be tested
+            // over real loopback sockets, which is the only way to prove things like "a second
+            // connection cannot steal a live player's identity" - that behaviour does not exist
+            // anywhere a pure function could be pointed at.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
