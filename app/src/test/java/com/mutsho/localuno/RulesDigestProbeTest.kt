@@ -134,10 +134,26 @@ class RulesDigestProbeTest {
         }
     }
 
-    @Test fun `the order is stable`() {
-        // The list is rebuilt on every recomposition; an unstable order would reshuffle on screen.
-        val s = settings(rules = GameRules(true, true, true, true))
-        assertEquals(labels(s), labels(s))
+    @Test fun `the order is the documented one`() {
+        // Was `assertEquals(labels(s), labels(s))`, which compares a function to itself and cannot
+        // fail - it would have passed against a digest that shuffled its output on every call,
+        // which is the exact thing it claimed to rule out. The list is rebuilt on every
+        // recomposition, so an unstable order would visibly reshuffle on screen.
+        //
+        // Asserting the actual sequence instead: optional rules first in HouseRule order, then the
+        // knockout line, then the clock.
+        val s = settings(mode = GameMode.NO_MERCY, rules = GameRules(true, true, true, true))
+        assertEquals(
+            listOf(
+                "Stacking",
+                "Last card must be a number",
+                "Zero rotates hands",
+                "Seven swaps hands",
+                "Knocked out at 25 cards",
+                "15s turn clock"
+            ),
+            labels(s)
+        )
     }
 
     @Test fun `the headline counts only the optional rules`() {
