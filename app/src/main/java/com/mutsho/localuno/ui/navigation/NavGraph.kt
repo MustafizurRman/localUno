@@ -9,7 +9,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.mutsho.localuno.ui.theme.NocturneSurface
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -17,6 +16,10 @@ import com.mutsho.localuno.model.GameSettings
 import com.mutsho.localuno.ui.components.KeepScreenOn
 import com.mutsho.localuno.ui.components.LocalAmbientMotion
 import com.mutsho.localuno.ui.components.LocalCardSkin
+import com.mutsho.localuno.ui.components.CardInFlight
+import com.mutsho.localuno.ui.components.LocalCardInFlight
+import com.mutsho.localuno.ui.components.LocalSeatAnchors
+import com.mutsho.localuno.ui.components.SeatAnchors
 import com.mutsho.localuno.ui.components.rememberAmbientActive
 import com.mutsho.localuno.ui.components.rememberTableHaptics
 import com.mutsho.localuno.ui.screens.*
@@ -450,7 +453,16 @@ fun AppNavigation() {
                 isMyTurn = gameState.currentPlayer?.id == localPlayerId
             )
 
-            CompositionLocalProvider(LocalAmbientMotion provides ambientActive) {
+            // One registry per board, so anchors from a previous round cannot survive into the
+            // next one and fly a card from a seat that has since moved.
+            val seatAnchors = remember { SeatAnchors() }
+            val cardInFlight = remember { CardInFlight() }
+
+            CompositionLocalProvider(
+                LocalAmbientMotion provides ambientActive,
+                LocalSeatAnchors provides seatAnchors,
+                LocalCardInFlight provides cardInFlight
+            ) {
             UnoBoardScreen(
                 gameState = gameState,
                 localPlayerId = localPlayerId,

@@ -179,6 +179,10 @@ fun BoardScaffold(
             timer = timer
         )
 
+        // Your own hand registers under YOUR player id, which is what lets the flight overlay treat
+        // "you played it" as an ordinary case rather than a special one - your cards fly from your
+        // hand, everyone else's from their seat, through exactly the same lookup.
+        Box(modifier = Modifier.seatAnchor(localPlayerId, LocalSeatAnchors.current)) {
         HandArc(
             hand = hand,
             playableCardIds = playableCardIds,
@@ -207,6 +211,7 @@ fun BoardScaffold(
                 (LocalConfiguration.current.screenHeightDp * 196f / 844f).dp
             )
         )
+        }
 
         BoardActionBar(
             // TWO cards, not one: the call is a declaration made before the play that leaves you
@@ -218,6 +223,15 @@ fun BoardScaffold(
             onSendEmoji = onSendEmoji
         )
     }
+
+    // Last inside the root Box, so a card in flight passes over the felt and the seats rather than
+    // under them. It is positioned in root coordinates from SeatAnchors, so it does not care which
+    // skin drew what or how deeply any of it is nested.
+    DiscardFlightOverlay(
+        gameState = gameState,
+        showSymbols = showSymbols,
+        rules = gameState.settings.rules
+    )
     }
 }
 
@@ -345,7 +359,9 @@ fun DiscardSlot(
     height: Dp,
     rotationDeg: Float = 0f
 ) {
-    Box(modifier = Modifier.size(width, height)) {
+    // Tagged once here rather than in each skin: all three draw their discard through this, so the
+    // flight overlay knows where the pile is on every board without any of them knowing about it.
+    Box(modifier = Modifier.size(width, height).seatAnchor(SeatAnchors.DISCARD, LocalSeatAnchors.current)) {
         Box(
             modifier = Modifier
                 .matchParentSize()
@@ -355,7 +371,18 @@ fun DiscardSlot(
                     shape = RoundedCornerShape(8.dp)
                 )
         )
-        gameState.topCard?.let { top ->
+        // While a card is on its way here, keep showing the one it is about to cover.
+        //
+        // The engine applies a play before the animation starts, so drawing gameState.topCard
+        // unconditionally showed the arriving card settled on the pile AND arriving above it at the
+        // same time - the same card in two places, which reads exactly as wrong as it sounds. Found
+        // on a device rather than in review; nothing about the code looks incorrect.
+        val arriving = LocalCardInFlight.current.cardId
+        val shown = gameState.topCard?.let { top ->
+            if (top.id == arriving) gameState.discardPile.getOrNull(gameState.discardPile.size - 2)
+            else top
+        }
+        shown?.let { top ->
             // ubBurst: the landing card pops in (scale .4 -> 1.12 -> 1, rotate -9 -> 0) each time
             // the discard changes. This is the design's `flying` moment reduced to its visible
             // payoff - a full hand-to-pile flight would need the card's on-screen origin, which

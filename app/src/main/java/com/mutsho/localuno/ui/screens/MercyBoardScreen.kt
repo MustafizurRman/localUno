@@ -1,10 +1,7 @@
 package com.mutsho.localuno.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
-import com.mutsho.localuno.ui.components.ColorSymbol
 import com.mutsho.localuno.ui.components.DirectionGlyph
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,6 +22,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mutsho.localuno.R
+import com.mutsho.localuno.ui.components.LocalSeatAnchors
+import com.mutsho.localuno.ui.components.seatAnchor
 import com.mutsho.localuno.model.*
 import com.mutsho.localuno.ui.components.*
 import com.mutsho.localuno.ui.theme.*
@@ -276,7 +275,9 @@ private fun MercySeatView(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp),
-        modifier = modifier.width(72.dp).alphaIf(!seat.isConnected, 0.45f)
+        // See RoundSeat - this skin arranges seats differently and needs no other change.
+        modifier = modifier.seatAnchor(seat.id, LocalSeatAnchors.current)
+            .width(72.dp).alphaIf(!seat.isConnected, 0.45f)
     ) {
         Box(
             modifier = Modifier

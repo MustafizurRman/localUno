@@ -2,14 +2,11 @@ package com.mutsho.localuno.ui.screens
 
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,11 +15,11 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mutsho.localuno.R
+import com.mutsho.localuno.ui.components.LocalSeatAnchors
+import com.mutsho.localuno.ui.components.seatAnchor
 import com.mutsho.localuno.model.*
 import com.mutsho.localuno.ui.components.*
 import com.mutsho.localuno.ui.theme.*
@@ -249,7 +246,10 @@ private fun RailColumn(
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(5.dp),
+                // The skin the synthetic-ring approach would have got most wrong: these seats sit
+                // in edge columns, nowhere near a ring drawn around the table's centre.
                 modifier = Modifier
+                    .seatAnchor(seat.id, LocalSeatAnchors.current)
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (isTurn) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.04f))
                     .drawEdgeStripe(edge, leftEdge)

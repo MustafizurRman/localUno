@@ -1,6 +1,5 @@
 package com.mutsho.localuno.ui.screens
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,7 +12,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -21,6 +19,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mutsho.localuno.model.*
+import com.mutsho.localuno.ui.components.LocalSeatAnchors
+import com.mutsho.localuno.ui.components.seatAnchor
 import com.mutsho.localuno.ui.components.LocalAmbientMotion
 import com.mutsho.localuno.ui.components.rememberSweepAngle
 import com.mutsho.localuno.ui.components.*
@@ -261,7 +261,9 @@ private fun RoundSeat(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp),
-        modifier = modifier.width(78.dp).alphaIf(!seat.isConnected, 0.45f)
+        // Reports where this seat actually is, so a played card can fly from it - see SeatAnchors.
+        modifier = modifier.seatAnchor(seat.id, LocalSeatAnchors.current)
+            .width(78.dp).alphaIf(!seat.isConnected, 0.45f)
     ) {
         Box(
             modifier = Modifier
