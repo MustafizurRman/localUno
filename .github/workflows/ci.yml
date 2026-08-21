@@ -1,0 +1,67 @@
+name: CI
+
+# The 322-test suite is all JVM tests - the engine, the model and the sync layer carry no Android
+# imports - so this needs no emulator and no device. It is deliberately the whole gate: assembleDebug
+# proves the Compose code still compiles, testDebugUnitTest proves the rules still hold.
+#
+# There is no instrumented-test job on purpose. The app never reaches Compose UI idle (ambient
+# animations never stop), so Espresso and Compose UI tests hang on the idling contract rather than
+# failing. Adding a job that cannot pass would only teach people to ignore a red tick.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch makes the first run irrelevant - stop it rather than queue it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # AGP 8.5.1 requires JDK 17. Temurin matches what Android Studio ships.
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Compile
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      # The HTML report is the useful artefact when something goes red - the console output of a
+      # failing Gradle test task tells you the class but not the assertion.
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: app/build/reports/tests/testDebugUnitTest
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: localuno-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14
+          if-no-files-found: ignore
