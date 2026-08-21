@@ -70,6 +70,19 @@ class LobbyViewModel(application: Application) : AndroidViewModel(application) {
     private var clientConnectionJob: Job? = null
     private var clientDisconnectJob: Job? = null
 
+    /**
+     * Host-only: who the host has removed from THIS table.
+     *
+     * Removal without this is theatre. A guest's playerId is a stable per-device UUID and the join
+     * path treats a familiar id as a rejoin, so a removed guest tapping the table again - or simply
+     * scanning the QR a second time - would walk straight back into the seat they were just taken
+     * out of, with the host's roster accepting them as a reconnect.
+     *
+     * Scoped to the lobby's lifetime on purpose, not persisted: this is "not at this table", not a
+     * permanent ban on a person. Cleared in leaveLobby(), so hosting again starts everyone even.
+     */
+    private val removedPlayerIds = mutableSetOf<String>()
+
     private val _isHost = MutableStateFlow(false)
     val isHost: StateFlow<Boolean> = _isHost
 
@@ -105,6 +118,12 @@ class LobbyViewModel(application: Application) : AndroidViewModel(application) {
     // them back to the lobby (unlike gameStarted, which they can't watch from the End screen).
     private val _rematchRequested = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val rematchRequested: SharedFlow<Unit> = _rematchRequested
+
+    // Fires on a guest the host removed, carrying the reason to show. An event rather than state:
+    // it has to move the guest off the lobby route exactly once, and a StateFlow would re-fire it
+    // on every recomposition that re-collected it.
+    private val _removedFromTable = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val removedFromTable: SharedFlow<String> = _removedFromTable
 
     fun createLobby(settings: GameSettings, playerId: String, playerName: String, avatarColor: Int) {
         _isHost.value = true
@@ -244,13 +263,38 @@ class LobbyViewModel(application: Application) : AndroidViewModel(application) {
         broadcastLobbyUpdate()
     }
 
-    /** Host-only. Guarded on isBot so this can never be turned into a kick for a real player. */
-    fun removeBot(botId: String) {
-        if (!_isHost.value) return
-        if (_gameStarted.value) return
-        val target = _players.value.find { it.id == botId } ?: return
-        if (!target.isBot) return
-        _players.value = _players.value.filter { it.id != botId }
+    /**
+     * Host-only: take a seat off the table, bot or human.
+     *
+     * Pre-game only. Removing someone mid-round is a different and much larger problem - the engine
+     * holds their hand, their seat is woven into the turn order, and the deck has to stay conserved -
+     * and a match already has an answer for a player who should not be there: the host ends it.
+     *
+     * A bot just vanishes from the roster; the host runs them, so there is nobody to tell. A human
+     * has to be told and then kept out, or the removal does not hold - see [removedPlayerIds] and
+     * NetworkMessage.RemovedFromTable.
+     */
+    fun removePlayer(playerId: String) {
+        val verdict = TableRemoval.decide(
+            removerIsHost = _isHost.value,
+            gameStarted = _gameStarted.value,
+            target = _players.value.find { it.id == playerId },
+            localPlayerId = localPlayerId
+        )
+        if (verdict is TableRemoval.Verdict.Refuse) return
+
+        _players.value = _players.value.filter { it.id != playerId }
+
+        if (verdict is TableRemoval.Verdict.RemovePerson) {
+            removedPlayerIds.add(playerId)
+            // Ordered send-then-close: the guest has to receive the reason before the socket dies,
+            // or their client cannot tell this apart from an ordinary drop and will try to reconnect.
+            gameServer?.sendThenDisconnect(
+                playerId,
+                NetworkMessage.RemovedFromTable()
+            )
+        }
+
         broadcastLobbyUpdate()
     }
 
@@ -580,11 +624,27 @@ class LobbyViewModel(application: Application) : AndroidViewModel(application) {
         _gameStarted.value = false
         _error.value = null
         _hostAddress.value = null
+        // "Not at this table", and the table is gone - see removedPlayerIds.
+        removedPlayerIds.clear()
     }
 
     private fun handleServerMessage(clientId: String, message: NetworkMessage) {
         when (message) {
             is NetworkMessage.JoinRequest -> {
+                // Checked before the PIN, because someone the host has already removed knows the
+                // PIN by definition - they were inside. This is the guard that makes a removal
+                // hold rather than lasting until the guest taps the table again.
+                if (message.playerId in removedPlayerIds) {
+                    gameServer?.sendThenDisconnect(
+                        clientId,
+                        NetworkMessage.JoinResponse(
+                            accepted = false,
+                            reason = "The host removed you from this table"
+                        )
+                    )
+                    return
+                }
+
                 // Validate PIN
                 val settings = _settings.value
                 if (settings.pin != null && message.pin != settings.pin) {
@@ -673,6 +733,15 @@ class LobbyViewModel(application: Application) : AndroidViewModel(application) {
             is NetworkMessage.ReturnToLobby -> {
                 _gameStarted.value = false
                 viewModelScope.launch { _rematchRequested.emit(Unit) }
+            }
+            is NetworkMessage.RemovedFromTable -> {
+                // leaveLobby() rather than just disconnect(): it also cancels the reconnect
+                // observer, which would otherwise see the socket the host is about to close and
+                // start trying to get back into a table this device has just been told to leave.
+                // Emitted BEFORE the teardown: leaveLobby() cancels the very collector this handler
+                // is running inside, and the buffered emit is the one thing that has to survive it.
+                _removedFromTable.tryEmit(message.reason)
+                leaveLobby()
             }
             else -> {}
         }

@@ -223,6 +223,24 @@ sealed class NetworkMessage {
         override val type = "CHOOSE_SWAP_TARGET"
     }
 
+    /**
+     * Host -> one client: the host removed you from the table.
+     *
+     * Told explicitly rather than just having the socket closed, because those two look identical
+     * from the guest's side and mean opposite things: a dropped socket should trigger the reconnect
+     * path, and being removed must not. Without this message a removed guest's client would retry
+     * its way straight back onto the roster and the control would appear to do nothing.
+     *
+     * The host also remembers the id (see LobbyViewModel's removedPlayerIds) and refuses a later
+     * JoinRequest from it, so the removal survives the guest simply tapping the table again.
+     */
+    data class RemovedFromTable(
+        val reason: String = "The host removed you from the table",
+        override val sequenceNumber: Long = 0
+    ) : NetworkMessage() {
+        override val type = "REMOVED_FROM_TABLE"
+    }
+
     /** Host -> All: the host left an active match, ending it for everyone (no one else can take
      *  over the authoritative engine). */
     data class HostEndedGame(

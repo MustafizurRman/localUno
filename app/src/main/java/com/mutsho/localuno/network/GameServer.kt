@@ -217,6 +217,31 @@ class GameServer {
         } catch (_: Exception) {}
     }
 
+    /**
+     * Deliver one last message to a client, then close its socket - in that order, guaranteed.
+     *
+     * sendToClient() followed by disconnectClient() does NOT guarantee it: the write is queued onto
+     * the connection's writeDispatcher and returns immediately, so a close issued on the caller's
+     * thread can beat the bytes onto the socket and the client is left with nothing but a dropped
+     * connection. Queueing the close onto the SAME writeDispatcher puts it behind the write in the
+     * one place that serializes them.
+     *
+     * The map entry is dropped up front so nothing new can be addressed to this player in the
+     * meantime, and by value so a client that has already reconnected on a fresh socket keeps it -
+     * the same hazard the read loop's finally block guards against.
+     */
+    fun sendThenDisconnect(playerId: String, message: NetworkMessage) {
+        val connection = clients[playerId] ?: return
+        clients.remove(playerId, connection)
+        val serialized = MessageSerializer.serialize(message)
+        sendScope.launch {
+            scope.launch(connection.writeDispatcher) {
+                writeNow(connection, serialized)
+                try { connection.socket.close() } catch (_: Exception) {}
+            }
+        }
+    }
+
     fun getConnectedPlayerIds(): Set<String> = clients.keys.toSet()
 
     fun stop() {
